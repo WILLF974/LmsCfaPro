@@ -268,6 +268,27 @@ renderTopbar('Paramètres', [['Admin', url('admin/index.php')], ['Paramètres', 
               <input type="password" name="smtp_pass" class="form-control" placeholder="••••••••" value="<?= e($settings['smtp_pass'] ?? '') ?>">
             </div>
           </div>
+
+          <!-- ── Test d'envoi ── -->
+          <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--border)">
+            <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:12px">
+              <i class="fas fa-paper-plane" style="color:var(--primary-light);margin-right:5px"></i>Test d'envoi
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <div class="input-group" style="flex:1;min-width:220px;position:relative">
+                <i class="fas fa-at input-icon"></i>
+                <input type="email" id="test-email-addr" class="form-control" placeholder="destinataire@exemple.fr" style="padding-left:36px">
+              </div>
+              <button type="button" onclick="sendTestEmail()" id="test-email-btn" class="btn btn-secondary" style="white-space:nowrap">
+                <i class="fas fa-paper-plane"></i> Envoyer un email de test
+              </button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+              Utilise les valeurs <strong>actuellement saisies dans le formulaire</strong> (sauvegardées ou non) pour tester la connexion SMTP.
+            </div>
+            <div id="test-email-result" style="display:none;margin-top:12px"></div>
+          </div>
+
         </div>
       </div>
     </div>
@@ -289,6 +310,55 @@ function switchHomeMode(val) {
     document.getElementById('marketing-fields').style.display = val === 'marketing' ? 'block' : 'none';
     document.getElementById('lbl-default').style.borderColor  = val === 'default'   ? 'var(--primary)' : 'var(--border)';
     document.getElementById('lbl-marketing').style.borderColor = val === 'marketing' ? 'var(--primary)' : 'var(--border)';
+}
+
+async function sendTestEmail() {
+    const addr = document.getElementById('test-email-addr').value.trim();
+    if (!addr) {
+        document.getElementById('test-email-addr').focus();
+        return;
+    }
+    const btn    = document.getElementById('test-email-btn');
+    const result = document.getElementById('test-email-result');
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi en cours…';
+    result.style.display = 'none';
+
+    // Lire les valeurs courantes du formulaire (avant sauvegarde)
+    const get = id => (document.querySelector('[name="' + id + '"]')?.value || '');
+    const csrf = document.querySelector('[name="<?= CSRF_TOKEN_NAME ?>"]').value;
+
+    const body = new URLSearchParams({
+        '<?= CSRF_TOKEN_NAME ?>': csrf,
+        test_to:   addr,
+        smtp_host: get('smtp_host'),
+        smtp_port: get('smtp_port'),
+        smtp_user: get('smtp_user'),
+        smtp_pass: get('smtp_pass'),
+        smtp_from: get('smtp_from'),
+    });
+
+    try {
+        const resp = await fetch('<?= url('admin/settings/test_email.php') ?>', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body:    body.toString(),
+        });
+        const data = await resp.json();
+        result.style.display = 'block';
+        if (data.success) {
+            result.innerHTML = `<div class="alert alert-success" style="margin:0"><i class="fas fa-check-circle"></i> ${data.message}</div>`;
+        } else {
+            result.innerHTML = `<div class="alert alert-error" style="margin:0"><i class="fas fa-times-circle"></i> <strong>Échec :</strong> ${data.message}</div>`;
+        }
+    } catch (err) {
+        result.style.display = 'block';
+        result.innerHTML = '<div class="alert alert-error" style="margin:0"><i class="fas fa-times-circle"></i> Erreur réseau — vérifiez la console.</div>';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-paper-plane"></i> Envoyer un email de test';
+    }
 }
 </script>
 <?php renderFooter(); ?>
