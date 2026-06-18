@@ -41,7 +41,7 @@ if ($homepageMode === 'marketing') {
         'nb_students'   => (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='student' AND status='active'")->fetchColumn(),
         'nb_formations' => (int)$pdo->query("SELECT COUNT(*) FROM formations WHERE status='active'")->fetchColumn(),
         'nb_rncp'       => (int)$pdo->query("SELECT COUNT(*) FROM rncp_titles")->fetchColumn(),
-        'rncp_titles'   => $pdo->query("SELECT code, title FROM rncp_titles ORDER BY created_at DESC LIMIT 5")->fetchAll(),
+        'rncp_titles'   => $pdo->query("SELECT rncp_code, title FROM rncp_titles ORDER BY created_at DESC LIMIT 5")->fetchAll(),
     ];
 }
 ?>
@@ -195,7 +195,7 @@ if ($homepageMode === 'marketing') {
         </div>
         <?php foreach ($mktData['rncp_titles'] as $t): ?>
         <div class="mkt-rncp-item">
-          <span class="mkt-rncp-code"><?= e($t['code']) ?></span>
+          <span class="mkt-rncp-code"><?= e($t['rncp_code']) ?></span>
           <span style="color:rgba(255,255,255,.85)"><?= e($t['title']) ?></span>
         </div>
         <?php endforeach; ?>
