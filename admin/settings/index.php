@@ -24,6 +24,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'smtp_user'       => trim($_POST['smtp_user'] ?? ''),
         'smtp_pass'       => trim($_POST['smtp_pass'] ?? ''),
         'smtp_from'       => trim($_POST['smtp_from'] ?? ''),
+        'homepage_mode'          => in_array($_POST['homepage_mode'] ?? '', ['default','marketing']) ? $_POST['homepage_mode'] : 'default',
+        'marketing_headline'     => trim($_POST['marketing_headline'] ?? ''),
+        'marketing_description'  => trim($_POST['marketing_description'] ?? ''),
+        'marketing_badge_text'   => trim($_POST['marketing_badge_text'] ?? ''),
+        'marketing_cta_label'    => trim($_POST['marketing_cta_label'] ?? ''),
         'registration_open' => isset($_POST['registration_open']) ? '1' : '0',
         'maintenance_mode'  => isset($_POST['maintenance_mode']) ? '1' : '0',
         'default_language'    => $_POST['default_language'] ?? 'fr',
@@ -75,6 +80,62 @@ renderTopbar('Paramètres', [['Admin', url('admin/index.php')], ['Paramètres', 
           <div class="form-group">
             <label class="form-label">Adresse</label>
             <textarea name="address" class="form-control" rows="3" placeholder="1 rue de la Formation, 75000 Paris"><?= e($settings['address'] ?? '') ?></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Page d'accueil -->
+      <div class="card" style="grid-column:1/-1">
+        <div class="card-header"><h3 class="card-title"><i class="fas fa-home" style="color:var(--primary-light)"></i> Page d'accueil publique</h3></div>
+        <div class="card-body">
+          <?php $hMode = $settings['homepage_mode'] ?? 'default'; ?>
+          <!-- Choix du mode -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+            <label style="cursor:pointer;border:2px solid <?= $hMode==='default'?'var(--primary)':'var(--border)' ?>;border-radius:var(--radius-lg);padding:16px;display:flex;gap:12px;align-items:flex-start;transition:border-color .2s" id="lbl-default">
+              <input type="radio" name="homepage_mode" value="default" <?= $hMode==='default'?'checked':'' ?> onchange="switchHomeMode(this.value)" style="margin-top:2px;accent-color:var(--primary)">
+              <div>
+                <div style="font-weight:700;color:white;margin-bottom:4px"><i class="fas fa-layer-group" style="margin-right:6px;color:var(--primary-light)"></i>Présentation LMS (défaut)</div>
+                <div style="font-size:12px;color:var(--text-muted)">Affiche les fonctionnalités de la plateforme : Qualiopi, RNCP, gamification, multi-formats.</div>
+              </div>
+            </label>
+            <label style="cursor:pointer;border:2px solid <?= $hMode==='marketing'?'var(--primary)':'var(--border)' ?>;border-radius:var(--radius-lg);padding:16px;display:flex;gap:12px;align-items:flex-start;transition:border-color .2s" id="lbl-marketing">
+              <input type="radio" name="homepage_mode" value="marketing" <?= $hMode==='marketing'?'checked':'' ?> onchange="switchHomeMode(this.value)" style="margin-top:2px;accent-color:var(--primary)">
+              <div>
+                <div style="font-weight:700;color:white;margin-bottom:4px"><i class="fas fa-bullhorn" style="margin-right:6px;color:#f59e0b"></i>Vitrine du centre de formation</div>
+                <div style="font-size:12px;color:var(--text-muted)">Affiche le nombre d'apprenants, les titres RNCP, un message d'accroche et les contacts. Idéal pour attirer de nouveaux candidats.</div>
+              </div>
+            </label>
+          </div>
+
+          <!-- Champs visibles uniquement en mode marketing -->
+          <div id="marketing-fields" style="display:<?= $hMode==='marketing'?'block':'none' ?>">
+            <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:var(--radius-lg);padding:20px">
+              <div style="font-size:12px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.07em;margin-bottom:16px"><i class="fas fa-pencil-alt" style="margin-right:5px"></i>Contenu de la vitrine</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Badge / certification (ligne courte)</label>
+                  <input type="text" name="marketing_badge_text" class="form-control" placeholder="Centre de Formation Agréé · Certification Qualiopi" value="<?= e($settings['marketing_badge_text'] ?? '') ?>">
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label class="form-label">Libellé bouton CTA</label>
+                  <input type="text" name="marketing_cta_label" class="form-control" placeholder="Découvrir nos formations" value="<?= e($settings['marketing_cta_label'] ?? '') ?>">
+                </div>
+                <div class="form-group" style="margin:0;grid-column:1/-1">
+                  <label class="form-label">Accroche principale (titre H1)</label>
+                  <input type="text" name="marketing_headline" class="form-control" placeholder="Formez-vous aux métiers de demain" value="<?= e($settings['marketing_headline'] ?? '') ?>">
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Affiché en grand sur la page d'accueil</div>
+                </div>
+                <div class="form-group" style="margin:0;grid-column:1/-1">
+                  <label class="form-label">Description / argument principal</label>
+                  <textarea name="marketing_description" class="form-control" rows="3" placeholder="Rejoignez notre centre de formation et obtenez un titre professionnel reconnu par l'État."><?= e($settings['marketing_description'] ?? '') ?></textarea>
+                </div>
+              </div>
+              <div style="margin-top:14px;padding:10px 14px;background:rgba(99,102,241,.08);border-radius:var(--radius);font-size:12px;color:var(--text-muted)">
+                <i class="fas fa-info-circle" style="color:var(--primary-light);margin-right:5px"></i>
+                Les statistiques (apprenants, formations, titres RNCP) sont affichées <strong style="color:white">automatiquement</strong> depuis la base de données.
+                Les coordonnées sont reprises depuis les champs <em>Email de contact</em>, <em>Téléphone</em> et <em>Adresse</em> ci-dessous.
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -223,6 +284,11 @@ function toggleApiKey() {
     const e = document.getElementById('api-key-eye');
     if (f.type === 'password') { f.type = 'text'; e.className = 'fas fa-eye-slash'; }
     else { f.type = 'password'; e.className = 'fas fa-eye'; }
+}
+function switchHomeMode(val) {
+    document.getElementById('marketing-fields').style.display = val === 'marketing' ? 'block' : 'none';
+    document.getElementById('lbl-default').style.borderColor  = val === 'default'   ? 'var(--primary)' : 'var(--border)';
+    document.getElementById('lbl-marketing').style.borderColor = val === 'marketing' ? 'var(--primary)' : 'var(--border)';
 }
 </script>
 <?php renderFooter(); ?>
