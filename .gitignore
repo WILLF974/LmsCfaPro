@@ -1,0 +1,36 @@
+# ══ Credentials & config sensible ══════════════════════════════
+# Ce fichier contient FTP, DB et mots de passe — NE JAMAIS committer
+InfosDuSite.txt
+# La config DB réelle (credentials) reste hors git
+config/database.php
+
+# ══ Fichiers uploadés par les utilisateurs ═══════════════════════
+# Trop lourds et spécifiques à chaque serveur
+uploads/avatars/*
+uploads/courses/*
+uploads/documents/*
+uploads/evaluations/*
+uploads/lessons/*
+# Conserver les .htaccess de protection dans uploads/
+!uploads/**/.htaccess
+!uploads/.htaccess
+
+# ══ Scripts de déploiement ponctuels ════════════════════════════
+deploy_patch.php
+admin/rncp/diag2.php
+
+# ══ macOS ════════════════════════════════════════════════════════
+.DS_Store
+**/.DS_Store
+._*
+
+# ══ Éditeur ══════════════════════════════════════════════════════
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ══ Logs / cache ════════════════════════════════════════════════
+*.log
+/tmp/
+/cache/

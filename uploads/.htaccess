@@ -1,0 +1,17 @@
+# Bloquer l'exécution de PHP dans les uploads
+<FilesMatch "\.php$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order Allow,Deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# Bloquer l'exécution de scripts
+Options -ExecCGI
+AddHandler cgi-script .php .pl .py .sh .cgi
+
+# Pas de liste de répertoire
+Options -Indexes

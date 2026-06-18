@@ -1,0 +1,62 @@
+# ============================================================
+# LMS CFA Pro — .htaccess principal
+# Compatible Apache (Hostinger)
+# ============================================================
+
+Options -Indexes
+ServerSignature Off
+
+# Activer le module Rewrite
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # HTTPS redirect (décommenter en production sur Hostinger)
+  # RewriteCond %{HTTPS} off
+  # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # Bloquer l'accès aux dossiers sensibles
+  RewriteRule ^config/ - [F,L]
+  RewriteRule ^database/ - [F,L]
+
+  # Autoriser les fichiers et dossiers existants
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+</IfModule>
+
+# Headers de sécurité
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set X-XSS-Protection "1; mode=block"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  # CSP à personnaliser selon vos domaines vidéo
+  # Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' fonts.googleapis.com cdnjs.cloudflare.com; font-src 'self' fonts.gstatic.com cdnjs.cloudflare.com; img-src 'self' data:; frame-src youtube.com www.youtube.com vimeo.com player.vimeo.com;"
+</IfModule>
+
+# Limiter la taille des uploads PHP
+<IfModule mod_php.c>
+  php_value upload_max_filesize 50M
+  php_value post_max_size 55M
+  php_value max_execution_time 120
+  php_value memory_limit 256M
+</IfModule>
+
+# Cache pour les assets statiques
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 1 month"
+  ExpiresByType application/javascript "access plus 1 month"
+  ExpiresByType image/jpeg "access plus 1 month"
+  ExpiresByType image/png "access plus 1 month"
+  ExpiresByType image/webp "access plus 1 month"
+  ExpiresByType image/gif "access plus 1 month"
+  ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+
+# Compression GZIP
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json
+</IfModule>
+
+# NOTE : le blocage PHP pour les uploads est dans uploads/.htaccess
