@@ -495,22 +495,24 @@ function addPdfSlot() {
   div.className = 'pdf-slot';
   div.id = 'ps-' + id;
   div.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)';
-  div.innerHTML =
-    '<div class="slot-num" style="width:28px;height:28px;border-radius:6px;background:rgba(239,68,68,.15);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#ef4444;flex-shrink:0;margin-top:2px">' + num + '</div>' +
-    '<div style="flex:1;min-width:0">' +
-      '<input type="file" name="pdf_files[]" accept=".pdf,application/pdf" style="display:none" id="pf-' + id + '" onchange="onPdfSelected(this)">' +
-      '<div id="pfl-' + id + '" onclick="document.getElementById(\'pf-' + id + '\').click()"' +
-        ' style="font-size:13px;color:var(--text-muted);cursor:pointer;padding:10px 14px;border:2px dashed var(--border);border-radius:6px;text-align:center;transition:.2s"' +
-        ' onmouseover="this.style.borderColor=\'var(--primary)\'" onmouseout="this.style.borderColor=document.getElementById(\'pf-' + id + '\').files.length?\'var(--success)\":\'var(--border)\'">' +
-        '<i class="fas fa-file-pdf" style="color:#ef4444;margin-right:6px"></i>Cliquer pour sélectionner un PDF' +
-      '</div>' +
-      '<input type="text" name="pdf_names[]" placeholder="Nom du document (ex : Chapitre 1)" class="form-control" style="margin-top:6px;font-size:12px" id="pn-' + id + '">' +
-    '</div>' +
-    '<div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;margin-top:2px">' +
-      '<button type="button" onclick="movePdfSlot(\'ps-' + id + '\',-1)" class="btn btn-ghost btn-sm" style="padding:3px 8px" title="Remonter"><i class="fas fa-chevron-up"></i></button>' +
-      '<button type="button" onclick="movePdfSlot(\'ps-' + id + '\',1)" class="btn btn-ghost btn-sm" style="padding:3px 8px" title="Descendre"><i class="fas fa-chevron-down"></i></button>' +
-    '</div>' +
-    '<button type="button" onclick="removePdfSlot(\'ps-' + id + '\')" class="btn btn-ghost btn-sm" style="color:var(--danger);flex-shrink:0;margin-top:2px" title="Supprimer"><i class="fas fa-trash"></i></button>';
+  div.innerHTML = `
+    <div class="slot-num" style="width:28px;height:28px;border-radius:6px;background:rgba(239,68,68,.15);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#ef4444;flex-shrink:0;margin-top:2px">${num}</div>
+    <div style="flex:1;min-width:0">
+      <input type="file" name="pdf_files[]" accept=".pdf,application/pdf" style="display:none" id="pf-${id}" onchange="onPdfSelected(this)">
+      <div id="pfl-${id}" onclick="document.getElementById('pf-${id}').click()"
+        style="font-size:13px;color:var(--text-muted);cursor:pointer;padding:10px 14px;border:2px dashed var(--border);border-radius:6px;text-align:center;transition:.2s"
+        onmouseover="this.style.borderColor='var(--primary)'"
+        onmouseout="this.style.borderColor='var(--border)'">
+        <i class="fas fa-file-pdf" style="color:#ef4444;margin-right:6px"></i>Cliquer pour sélectionner un PDF
+      </div>
+      <input type="text" name="pdf_names[]" placeholder="Nom du document (ex : Chapitre 1)" class="form-control" style="margin-top:6px;font-size:12px" id="pn-${id}">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;margin-top:2px">
+      <button type="button" onclick="movePdfSlot('ps-${id}',-1)" class="btn btn-ghost btn-sm" style="padding:3px 8px" title="Remonter"><i class="fas fa-chevron-up"></i></button>
+      <button type="button" onclick="movePdfSlot('ps-${id}',1)" class="btn btn-ghost btn-sm" style="padding:3px 8px" title="Descendre"><i class="fas fa-chevron-down"></i></button>
+    </div>
+    <button type="button" onclick="removePdfSlot('ps-${id}')" class="btn btn-ghost btn-sm" style="color:var(--danger);flex-shrink:0;margin-top:2px" title="Supprimer"><i class="fas fa-trash"></i></button>
+  `;
   slots.appendChild(div);
   updateSlotNumbers();
 }
