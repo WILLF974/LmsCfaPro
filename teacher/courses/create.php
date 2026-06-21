@@ -53,9 +53,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // File upload
     $filePath = $lesson['file_path'] ?? null;
-    if (!empty($_FILES['lesson_file']['name'])) {
-        $allowed = ALLOWED_DOC_TYPES;
-        $upload = uploadFile($_FILES['lesson_file'], 'courses', $allowed, MAX_UPLOAD_SIZE);
+
+    if ($data['content_type'] === 'pdf' && !empty($_FILES['pdf_files']['name'][0])) {
+        // ── Multi-PDF upload ──────────────────────────────────────
+        $pdfEntries = [];
+        foreach ($_FILES['pdf_files']['name'] as $i => $pdfName) {
+            if (empty($pdfName) || $_FILES['pdf_files']['error'][$i] !== UPLOAD_ERR_OK) continue;
+            $pdfFile = [
+                'name'     => $pdfName,
+                'tmp_name' => $_FILES['pdf_files']['tmp_name'][$i],
+                'error'    => $_FILES['pdf_files']['error'][$i],
+                'size'     => $_FILES['pdf_files']['size'][$i],
+                'type'     => $_FILES['pdf_files']['type'][$i],
+            ];
+            $upload = uploadFile($pdfFile, 'courses', ['application/pdf'], MAX_UPLOAD_SIZE);
+            if ($upload['success']) {
+                $customName = trim($_POST['pdf_names'][$i] ?? '') ?: pathinfo($pdfName, PATHINFO_FILENAME);
+                $pdfEntries[] = ['path' => $upload['path'], 'name' => $customName];
+            } else {
+                $errors[] = 'PDF n°' . ($i + 1) . ' : ' . $upload['error'];
+            }
+        }
+        if (!empty($pdfEntries)) {
+            $filePath = json_encode($pdfEntries, JSON_UNESCAPED_UNICODE);
+        }
+    } elseif (!empty($_FILES['lesson_file']['name'])) {
+        // ── Fichier unique (autres types) ─────────────────────────
+        $upload = uploadFile($_FILES['lesson_file'], 'courses', ALLOWED_DOC_TYPES, MAX_UPLOAD_SIZE);
         if ($upload['success']) $filePath = $upload['path'];
         else $errors[] = 'Fichier : ' . $upload['error'];
     }
@@ -270,6 +294,38 @@ renderTopbar($pageTitle, [['Enseignant', url('teacher/index.php')], ['Capsules',
               </div>
             </div>
 
+            <!-- Multi-PDF zone (PDF type uniquement) -->
+            <?php
+            $existingPdfs = null;
+            if ($isEdit && $lesson['content_type'] === 'pdf' && $lesson['file_path']) {
+                $decoded = json_decode($lesson['file_path'], true);
+                $existingPdfs = is_array($decoded) ? $decoded
+                    : [['path' => $lesson['file_path'], 'name' => pathinfo($lesson['file_path'], PATHINFO_FILENAME)]];
+            }
+            ?>
+            <div id="zone-pdf-multi" style="display:none">
+              <?php if ($existingPdfs): ?>
+              <div style="background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:var(--radius);padding:14px;margin-bottom:16px">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--primary);letter-spacing:.05em;margin-bottom:10px">
+                  <i class="fas fa-file-pdf" style="margin-right:5px"></i>PDFs actuellement en place
+                </div>
+                <?php foreach ($existingPdfs as $i => $ep): ?>
+                <div style="display:flex;align-items:center;gap:10px;padding:8px;background:var(--bg-elevated);border-radius:6px;margin-bottom:6px">
+                  <span style="width:22px;height:22px;border-radius:5px;background:#ef4444;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:white;flex-shrink:0"><?= $i+1 ?></span>
+                  <i class="fas fa-file-pdf" style="color:#ef4444;font-size:14px;flex-shrink:0"></i>
+                  <span style="flex:1;font-size:13px;color:var(--text)"><?= e($ep['name']) ?></span>
+                  <a href="<?= e(uploadUrl($ep['path'])) ?>" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px"><i class="fas fa-eye"></i></a>
+                </div>
+                <?php endforeach; ?>
+                <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Uploadez de nouveaux fichiers ci-dessous pour remplacer l'ensemble des PDFs.</p>
+              </div>
+              <?php endif; ?>
+              <div id="pdf-slots" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
+              <button type="button" onclick="addPdfSlot()" class="btn btn-ghost btn-sm">
+                <i class="fas fa-plus-circle" style="color:var(--primary);margin-right:6px"></i>Ajouter un PDF
+              </button>
+            </div>
+
             <!-- Text content -->
             <div id="zone-text" style="display:none">
               <div class="form-group">
@@ -391,31 +447,108 @@ typeCards.forEach(card => {
 function updateContentZone(type) {
   const zoneUrl      = document.getElementById('zone-url');
   const zoneText     = document.getElementById('zone-text');
+  const zonePdfMulti = document.getElementById('zone-pdf-multi');
   const title        = document.getElementById('content-title');
   const urlInput     = document.getElementById('content-url');
   const fileInput    = document.getElementById('lesson-file');
   const fileDropzone = document.getElementById('lesson-file-dropzone');
 
-  const titles = {video:'Contenu vidéo',pdf:'Fichier PDF',document:'Document',presentation:'Présentation',text:'Contenu HTML',link:'Lien externe',quiz:'Quiz intégré',exercise:'Fichier d\'exercice'};
+  const titles = {video:'Contenu vidéo',pdf:'Documents PDF',document:'Document',presentation:'Présentation',text:'Contenu HTML',link:'Lien externe',quiz:'Quiz intégré',exercise:'Fichier d\'exercice'};
   title.textContent = titles[type] || 'Contenu';
 
   if (type === 'text') {
     zoneUrl.style.display = 'none'; zoneText.style.display = 'block';
+    if (zonePdfMulti) zonePdfMulti.style.display = 'none';
+  } else if (type === 'pdf') {
+    zoneUrl.style.display = 'none'; zoneText.style.display = 'none';
+    if (zonePdfMulti) {
+      zonePdfMulti.style.display = 'block';
+      if (!document.querySelector('#pdf-slots .pdf-slot')) addPdfSlot();
+    }
   } else if (type === 'link') {
     zoneUrl.style.display = 'block'; zoneText.style.display = 'none';
+    if (zonePdfMulti) zonePdfMulti.style.display = 'none';
     urlInput.placeholder = 'https://exemple.com/ressource';
     fileDropzone.style.display = 'none';
   } else {
     zoneUrl.style.display = 'block'; zoneText.style.display = 'none';
+    if (zonePdfMulti) zonePdfMulti.style.display = 'none';
     fileDropzone.style.display = 'flex';
     if (type === 'video') {
       urlInput.placeholder = 'https://www.youtube.com/...';
       fileInput.accept = 'video/*,.mp4,.webm';
     } else {
       urlInput.placeholder = '';
-      fileInput.accept = type==='pdf' ? '.pdf' : '.doc,.docx,.xls,.xlsx,.ppt,.pptx';
+      fileInput.accept = '.doc,.docx,.xls,.xlsx,.ppt,.pptx';
     }
   }
+}
+
+// ── Multi-PDF slots ───────────────────────────────────────────
+var _pdfSlotId = 0;
+function addPdfSlot() {
+  _pdfSlotId++;
+  var id = _pdfSlotId;
+  var slots = document.getElementById('pdf-slots');
+  var num = slots.querySelectorAll('.pdf-slot').length + 1;
+  var div = document.createElement('div');
+  div.className = 'pdf-slot';
+  div.id = 'ps-' + id;
+  div.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)';
+  div.innerHTML =
+    '<div class="slot-num" style="width:28px;height:28px;border-radius:6px;background:rgba(239,68,68,.15);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#ef4444;flex-shrink:0;margin-top:2px">' + num + '</div>' +
+    '<div style="flex:1;min-width:0">' +
+      '<input type="file" name="pdf_files[]" accept=".pdf,application/pdf" style="display:none" id="pf-' + id + '" onchange="onPdfSelected(this)">' +
+      '<div id="pfl-' + id + '" onclick="document.getElementById(\'pf-' + id + '\').click()"' +
+        ' style="font-size:13px;color:var(--text-muted);cursor:pointer;padding:10px 14px;border:2px dashed var(--border);border-radius:6px;text-align:center;transition:.2s"' +
+        ' onmouseover="this.style.borderColor=\'var(--primary)\'" onmouseout="this.style.borderColor=document.getElementById(\'pf-' + id + '\').files.length?\'var(--success)\":\'var(--border)\'">' +
+        '<i class="fas fa-file-pdf" style="color:#ef4444;margin-right:6px"></i>Cliquer pour sélectionner un PDF' +
+      '</div>' +
+      '<input type="text" name="pdf_names[]" placeholder="Nom du document (ex : Chapitre 1)" class="form-control" style="margin-top:6px;font-size:12px" id="pn-' + id + '">' +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;margin-top:2px">' +
+      '<button type="button" onclick="movePdfSlot(\'ps-' + id + '\',-1)" class="btn btn-ghost btn-sm" style="padding:3px 8px" title="Remonter"><i class="fas fa-chevron-up"></i></button>' +
+      '<button type="button" onclick="movePdfSlot(\'ps-' + id + '\',1)" class="btn btn-ghost btn-sm" style="padding:3px 8px" title="Descendre"><i class="fas fa-chevron-down"></i></button>' +
+    '</div>' +
+    '<button type="button" onclick="removePdfSlot(\'ps-' + id + '\')" class="btn btn-ghost btn-sm" style="color:var(--danger);flex-shrink:0;margin-top:2px" title="Supprimer"><i class="fas fa-trash"></i></button>';
+  slots.appendChild(div);
+  updateSlotNumbers();
+}
+
+function onPdfSelected(input) {
+  var file = input.files[0]; if (!file) return;
+  var id = input.id.replace('pf-', '');
+  var label = document.getElementById('pfl-' + id);
+  var nameIn = document.getElementById('pn-' + id);
+  var size = file.size >= 1048576 ? (file.size / 1048576).toFixed(1) + ' Mo' : Math.round(file.size / 1024) + ' Ko';
+  label.innerHTML = '<i class="fas fa-check-circle" style="color:var(--success);margin-right:6px"></i><strong>' + file.name + '</strong> <span style="font-size:11px;color:var(--text-muted)">' + size + '</span>';
+  label.style.borderColor = 'var(--success)';
+  label.style.background = 'rgba(16,185,129,.05)';
+  if (!nameIn.value) nameIn.value = file.name.replace(/\.pdf$/i, '');
+}
+
+function movePdfSlot(slotId, dir) {
+  var slot = document.getElementById(slotId);
+  var parent = slot.parentNode;
+  var siblings = Array.from(parent.querySelectorAll('.pdf-slot'));
+  var idx = siblings.indexOf(slot);
+  var newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= siblings.length) return;
+  if (dir === -1) parent.insertBefore(slot, siblings[newIdx]);
+  else parent.insertBefore(siblings[newIdx], slot);
+  updateSlotNumbers();
+}
+
+function removePdfSlot(slotId) {
+  var s = document.getElementById(slotId); if (s) s.remove();
+  updateSlotNumbers();
+  if (!document.querySelector('#pdf-slots .pdf-slot')) addPdfSlot();
+}
+
+function updateSlotNumbers() {
+  document.querySelectorAll('#pdf-slots .pdf-slot').forEach(function(slot, i) {
+    var n = slot.querySelector('.slot-num'); if (n) n.textContent = i + 1;
+  });
 }
 
 // Rich text editor

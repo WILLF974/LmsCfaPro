@@ -147,15 +147,59 @@ renderTopbar($lesson['title'], [[$lesson['formation_title'], url('student/format
       <?php endif; ?>
 
       <?php elseif ($lesson['content_type'] === 'pdf'): ?>
-      <?php if ($lesson['file_path']): ?>
+      <?php
+      $pdfPages = null;
+      if ($lesson['file_path']) {
+          $decoded = json_decode($lesson['file_path'], true);
+          if (is_array($decoded) && count($decoded) > 0) {
+              $pdfPages = array_map(fn($p) => ['url' => uploadUrl($p['path']), 'name' => $p['name']], $decoded);
+          }
+      }
+      $firstPdfUrl = $pdfPages ? $pdfPages[0]['url'] : ($lesson['file_path'] ? uploadUrl($lesson['file_path']) : null);
+      $isMultiPdf  = $pdfPages && count($pdfPages) > 1;
+      ?>
+      <?php if ($firstPdfUrl): ?>
       <div style="position:relative">
-        <div id="doc-viewer" style="background:var(--bg-elevated);border-radius:var(--radius-lg);overflow:hidden;height:600px">
-          <iframe id="doc-iframe" src="<?= e(uploadUrl($lesson['file_path'])) ?>#toolbar=1&navpanes=1" style="width:100%;height:100%;border:none"></iframe>
+        <?php if ($isMultiPdf): ?>
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg) var(--radius-lg) 0 0;border-bottom:none">
+          <button id="pdf-prev" onclick="changePdf(-1)" disabled
+            style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px 10px;border-radius:6px;font-size:16px;transition:.15s;opacity:.35">
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <div style="flex:1;text-align:center">
+            <span id="pdf-doc-name" style="font-size:13px;font-weight:600;color:var(--text)"></span>
+            <span id="pdf-doc-num" style="font-size:12px;color:var(--text-muted);margin-left:8px"></span>
+          </div>
+          <button id="pdf-next" onclick="changePdf(1)"
+            style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px 10px;border-radius:6px;font-size:16px;transition:.15s">
+            <i class="fas fa-chevron-right"></i>
+          </button>
+        </div>
+        <?php endif; ?>
+        <div id="doc-viewer" style="background:var(--bg-elevated);border-radius:<?= $isMultiPdf ? '0 0 var(--radius-lg) var(--radius-lg)' : 'var(--radius-lg)' ?>;overflow:hidden;height:600px">
+          <iframe id="doc-iframe" src="<?= e($firstPdfUrl) ?>#toolbar=1&navpanes=1" style="width:100%;height:100%;border:none"></iframe>
         </div>
         <button onclick="openFullscreen()" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,.65);border:none;color:white;border-radius:8px;padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;backdrop-filter:blur(4px)">
           <i class="fas fa-expand"></i> Plein écran
         </button>
       </div>
+      <?php if ($isMultiPdf): ?>
+      <script>
+      var PDF_PAGES = <?= json_encode($pdfPages, JSON_UNESCAPED_UNICODE) ?>;
+      var pdfIdx = 0;
+      function changePdf(dir) {
+        pdfIdx = Math.max(0, Math.min(PDF_PAGES.length - 1, pdfIdx + dir));
+        document.getElementById('doc-iframe').src = PDF_PAGES[pdfIdx].url + '#toolbar=1&navpanes=1';
+        document.getElementById('pdf-doc-name').textContent = PDF_PAGES[pdfIdx].name;
+        document.getElementById('pdf-doc-num').textContent = '(' + (pdfIdx + 1) + ' / ' + PDF_PAGES.length + ')';
+        document.getElementById('pdf-prev').disabled = pdfIdx === 0;
+        document.getElementById('pdf-prev').style.opacity = pdfIdx === 0 ? '.35' : '1';
+        document.getElementById('pdf-next').disabled = pdfIdx === PDF_PAGES.length - 1;
+        document.getElementById('pdf-next').style.opacity = pdfIdx === PDF_PAGES.length - 1 ? '.35' : '1';
+      }
+      changePdf(0);
+      </script>
+      <?php endif; ?>
       <?php endif; ?>
 
       <?php elseif (in_array($lesson['content_type'], ['document','presentation'])): ?>
