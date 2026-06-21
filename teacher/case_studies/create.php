@@ -219,29 +219,38 @@ if ($isEdit && $cs['file_type'] === 'pdf' && $cs['file_path']) {
         : [['path' => $cs['file_path'], 'name' => pathinfo($cs['file_path'], PATHINFO_FILENAME)]];
 }
 
-// Pré-chargement cascade (mode édition)
+// Pré-chargement cascade (mode édition) — tout en try-catch pour éviter un crash si
+// une table de référence (modules, activity_types…) n'existe pas encore sur ce serveur
 $initModules       = [];
 $initActivityTypes = [];
 $initCompetencies  = [];
 $initLessons       = [];
 if ($cs['formation_id']) {
-    $s = $pdo->prepare("SELECT id, title FROM modules WHERE formation_id = ? ORDER BY order_num, title");
-    $s->execute([$cs['formation_id']]);
-    $initModules = $s->fetchAll();
+    try {
+        $s = $pdo->prepare("SELECT id, title FROM modules WHERE formation_id = ? ORDER BY order_num, title");
+        $s->execute([$cs['formation_id']]);
+        $initModules = $s->fetchAll();
+    } catch (PDOException $e) {}
 
-    $s = $pdo->prepare("SELECT at.id, at.code, at.title FROM activity_types at INNER JOIN formations f ON f.rncp_title_id = at.rncp_title_id WHERE f.id = ? ORDER BY at.order_num, at.code");
-    $s->execute([$cs['formation_id']]);
-    $initActivityTypes = $s->fetchAll();
+    try {
+        $s = $pdo->prepare("SELECT at.id, at.code, at.title FROM activity_types at INNER JOIN formations f ON f.rncp_title_id = at.rncp_title_id WHERE f.id = ? ORDER BY at.order_num, at.code");
+        $s->execute([$cs['formation_id']]);
+        $initActivityTypes = $s->fetchAll();
+    } catch (PDOException $e) {}
 }
 if ($cs['activity_type_id']) {
-    $s = $pdo->prepare("SELECT id, code, title FROM competencies WHERE activity_type_id = ? ORDER BY order_num, code");
-    $s->execute([$cs['activity_type_id']]);
-    $initCompetencies = $s->fetchAll();
+    try {
+        $s = $pdo->prepare("SELECT id, code, title FROM competencies WHERE activity_type_id = ? ORDER BY order_num, code");
+        $s->execute([$cs['activity_type_id']]);
+        $initCompetencies = $s->fetchAll();
+    } catch (PDOException $e) {}
 }
 if ($cs['module_id']) {
-    $s = $pdo->prepare("SELECT id, title FROM lessons WHERE module_id = ? ORDER BY order_num, title");
-    $s->execute([$cs['module_id']]);
-    $initLessons = $s->fetchAll();
+    try {
+        $s = $pdo->prepare("SELECT id, title FROM lessons WHERE module_id = ? ORDER BY order_num, title");
+        $s->execute([$cs['module_id']]);
+        $initLessons = $s->fetchAll();
+    } catch (PDOException $e) {}
 }
 
 // Ressources complémentaires existantes (mode édition)
@@ -264,6 +273,27 @@ function csResourceType(string $ext): string {
         in_array($ext, ['jpg','jpeg','png','gif','webp','svg']) => 'image',
         default                                      => 'other',
     };
+}
+
+function renderCascadeSelect(string $name, string $id, array $items, ?int $selected, string $label, string $placeholder, ?callable $labelFn = null): void {
+    $hasItems = !empty($items);
+    echo '<div id="grp-' . htmlspecialchars($id) . '">';
+    echo '<label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">' . htmlspecialchars($label) . '</label>';
+    echo '<select name="' . htmlspecialchars($name) . '" id="sel-' . htmlspecialchars($id) . '" class="form-control" style="font-size:12px"';
+    if ($id === 'module') echo ' onchange="onModuleChange(this.value)"';
+    if ($id === 'at')     echo ' onchange="onATChange(this.value)"';
+    echo '>';
+    if (!$hasItems) {
+        echo '<option value="" disabled selected style="color:var(--text-faint)">' . htmlspecialchars($placeholder) . '</option>';
+    } else {
+        echo '<option value="">— Aucun(e) —</option>';
+        foreach ($items as $item) {
+            $optLabel = $labelFn ? $labelFn($item) : mb_substr($item['title'], 0, 38);
+            $sel = ($item['id'] == $selected) ? ' selected' : '';
+            echo '<option value="' . (int)$item['id'] . '"' . $sel . '>' . htmlspecialchars($optLabel) . '</option>';
+        }
+    }
+    echo '</select></div>';
 }
 
 $contentTypes = [
@@ -589,30 +619,6 @@ renderTopbar($pageTitle, [
               </select>
             </div>
 
-            <?php
-            // Helpers pour rendre un groupe toujours visible
-            // Quand options vides : affiche une option placeholder désactivée
-            function renderCascadeSelect(string $name, string $id, array $items, int|null $selected, string $label, string $placeholder, ?callable $labelFn = null): void {
-                $hasItems = !empty($items);
-                echo '<div id="grp-' . htmlspecialchars($id) . '">';
-                echo '<label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">' . htmlspecialchars($label) . '</label>';
-                echo '<select name="' . htmlspecialchars($name) . '" id="sel-' . htmlspecialchars($id) . '" class="form-control" style="font-size:12px"';
-                if ($id === 'module') echo ' onchange="onModuleChange(this.value)"';
-                if ($id === 'at')     echo ' onchange="onATChange(this.value)"';
-                echo '>';
-                if (!$hasItems) {
-                    echo '<option value="" disabled selected style="color:var(--text-faint)">' . htmlspecialchars($placeholder) . '</option>';
-                } else {
-                    echo '<option value="">— Aucun(e) —</option>';
-                    foreach ($items as $item) {
-                        $optLabel = $labelFn ? $labelFn($item) : mb_substr($item['title'], 0, 38);
-                        $sel = ($item['id'] == $selected) ? ' selected' : '';
-                        echo '<option value="' . (int)$item['id'] . '"' . $sel . '>' . htmlspecialchars($optLabel) . '</option>';
-                    }
-                }
-                echo '</select></div>';
-            }
-            ?>
 
             <?php renderCascadeSelect('module_id','module',$initModules,$cs['module_id'],'Module de formation','← sélectionner une formation d\'abord'); ?>
             <?php renderCascadeSelect('lesson_id','lesson',$initLessons,$cs['lesson_id'],'Capsule de cours','← sélectionner un module d\'abord'); ?>
