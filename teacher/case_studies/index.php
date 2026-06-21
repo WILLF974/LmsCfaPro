@@ -30,6 +30,8 @@ foreach ([
     "ALTER TABLE case_studies ADD COLUMN competency_id INT NULL",
     "ALTER TABLE case_studies ADD COLUMN module_id INT NULL",
     "ALTER TABLE case_studies ADD COLUMN lesson_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN duration_minutes INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN xp_reward SMALLINT NOT NULL DEFAULT 0",
 ] as $sql) { try { $pdo->exec($sql); } catch (PDOException $e) {} }
 
 $ownerOnly   = !isAdmin() && !isPedagogy();
