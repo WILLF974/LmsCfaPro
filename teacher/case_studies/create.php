@@ -9,6 +9,28 @@ $editId = (int)($_GET['id'] ?? 0);
 $isEdit = $editId > 0;
 $errors = [];
 
+// ── Migration schéma (idem index.php — s'exécute quelle que soit la page d'entrée) ──
+$pdo->exec("CREATE TABLE IF NOT EXISTS case_study_resources (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    case_study_id  INT NOT NULL,
+    title          VARCHAR(255) NOT NULL,
+    type           VARCHAR(30) NOT NULL DEFAULT 'other',
+    file_path      TEXT DEFAULT NULL,
+    url            VARCHAR(500) DEFAULT NULL,
+    file_size      INT DEFAULT NULL,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_cs (case_study_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+foreach ([
+    "ALTER TABLE case_studies ADD COLUMN activity_type_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN competency_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN module_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN lesson_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN duration_minutes INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN xp_reward SMALLINT NOT NULL DEFAULT 0",
+] as $_mig) { try { $pdo->exec($_mig); } catch (PDOException $e) {} }
+
 // Charger formations pour le menu déroulant
 $formations = $pdo->query("SELECT id, title FROM formations WHERE status='active' ORDER BY title")->fetchAll();
 
@@ -225,9 +247,11 @@ if ($cs['module_id']) {
 // Ressources complémentaires existantes (mode édition)
 $existingResources = [];
 if ($isEdit) {
-    $s = $pdo->prepare('SELECT * FROM case_study_resources WHERE case_study_id = ? ORDER BY id');
-    $s->execute([$editId]);
-    $existingResources = $s->fetchAll();
+    try {
+        $s = $pdo->prepare('SELECT * FROM case_study_resources WHERE case_study_id = ? ORDER BY id');
+        $s->execute([$editId]);
+        $existingResources = $s->fetchAll();
+    } catch (PDOException $e) {}
 }
 
 function csResourceType(string $ext): string {
