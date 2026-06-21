@@ -24,14 +24,31 @@ $pdo->exec("
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
-$ownerOnly = !isAdmin() && !isPedagogy();
+// Ajouter les colonnes de rattachement si absentes (migration non-destructive)
+foreach ([
+    "ALTER TABLE case_studies ADD COLUMN activity_type_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN competency_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN module_id INT NULL",
+    "ALTER TABLE case_studies ADD COLUMN lesson_id INT NULL",
+] as $sql) { try { $pdo->exec($sql); } catch (PDOException $e) {} }
+
+$ownerOnly   = !isAdmin() && !isPedagogy();
 $whereClause = $ownerOnly ? 'WHERE cs.created_by = ' . $userId : '';
 
 $caseStudies = $pdo->query("
-    SELECT cs.*, f.title as formation_title,
-           CONCAT(u.first_name,' ',u.last_name) as author
+    SELECT cs.*,
+           f.title  AS formation_title,
+           m.title  AS module_title,
+           l.title  AS lesson_title,
+           at.code  AS at_code,  at.title AS at_title,
+           co.code  AS co_code,  co.title AS co_title,
+           CONCAT(u.first_name,' ',u.last_name) AS author
     FROM case_studies cs
-    LEFT JOIN formations f ON cs.formation_id = f.id
+    LEFT JOIN formations   f  ON cs.formation_id      = f.id
+    LEFT JOIN modules      m  ON cs.module_id         = m.id
+    LEFT JOIN lessons      l  ON cs.lesson_id         = l.id
+    LEFT JOIN activity_types at ON cs.activity_type_id = at.id
+    LEFT JOIN competencies   co ON cs.competency_id    = co.id
     LEFT JOIN users u ON cs.created_by = u.id
     $whereClause
     ORDER BY cs.created_at DESC
@@ -105,13 +122,33 @@ renderTopbar('Études de cas', [['Enseignant', url('teacher/index.php')], ['Étu
           <?php endif; ?>
           <?php if ($cs['formation_title']): ?>
           <span class="badge badge-secondary" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($cs['formation_title']) ?>">
-            <i class="fas fa-graduation-cap"></i> <?= e(mb_substr($cs['formation_title'],0,25)) ?>
+            <i class="fas fa-graduation-cap"></i> <?= e(mb_substr($cs['formation_title'],0,22)) ?>
+          </span>
+          <?php endif; ?>
+          <?php if ($cs['module_title']): ?>
+          <span class="badge badge-secondary" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Module : <?= e($cs['module_title']) ?>">
+            <i class="fas fa-cube"></i> <?= e(mb_substr($cs['module_title'],0,22)) ?>
+          </span>
+          <?php endif; ?>
+          <?php if ($cs['at_code']): ?>
+          <span class="badge badge-secondary" title="Bloc / Activité type : <?= e($cs['at_title']) ?>">
+            <i class="fas fa-layer-group"></i> <?= e($cs['at_code']) ?>
+          </span>
+          <?php endif; ?>
+          <?php if ($cs['co_code']): ?>
+          <span class="badge badge-secondary" title="Compétence : <?= e($cs['co_title']) ?>">
+            <i class="fas fa-star"></i> <?= e($cs['co_code']) ?>
+          </span>
+          <?php endif; ?>
+          <?php if ($cs['lesson_title']): ?>
+          <span class="badge badge-secondary" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Capsule : <?= e($cs['lesson_title']) ?>">
+            <i class="fas fa-book-open"></i> <?= e(mb_substr($cs['lesson_title'],0,22)) ?>
           </span>
           <?php endif; ?>
         </div>
 
         <div style="font-size:11px;color:var(--text-faint)">
-          <?= formatDate($cs['created_at'], 'd/m/Y à H:i', true) ?>
+          <?= formatDate($cs['created_at'], 'd/m/Y à H:i') ?>
           <?php if (!$ownerOnly): ?> · <?= e($cs['author']) ?><?php endif; ?>
         </div>
       </div>

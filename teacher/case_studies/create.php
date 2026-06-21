@@ -13,7 +13,7 @@ $errors = [];
 $formations = $pdo->query("SELECT id, title FROM formations WHERE status='active' ORDER BY title")->fetchAll();
 
 // Mode édition — charger l'étude existante
-$cs = ['id'=>0,'title'=>'','description'=>'','file_type'=>'pdf','file_path'=>null,'content_url'=>'','formation_id'=>null];
+$cs = ['id'=>0,'title'=>'','description'=>'','file_type'=>'pdf','file_path'=>null,'content_url'=>'','formation_id'=>null,'activity_type_id'=>null,'competency_id'=>null,'module_id'=>null,'lesson_id'=>null];
 if ($isEdit) {
     $stmt = $pdo->prepare('SELECT * FROM case_studies WHERE id = ?');
     $stmt->execute([$editId]);
@@ -31,11 +31,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postEditId = (int)($_POST['edit_id'] ?? 0);
 
     $data = [
-        'title'        => trim($_POST['title'] ?? ''),
-        'description'  => trim($_POST['description'] ?? ''),
-        'file_type'    => $_POST['file_type'] ?? 'pdf',
-        'content_url'  => trim($_POST['content_url'] ?? ''),
-        'formation_id' => (int)($_POST['formation_id'] ?? 0) ?: null,
+        'title'            => trim($_POST['title'] ?? ''),
+        'description'      => trim($_POST['description'] ?? ''),
+        'file_type'        => $_POST['file_type'] ?? 'pdf',
+        'content_url'      => trim($_POST['content_url'] ?? ''),
+        'formation_id'     => (int)($_POST['formation_id'] ?? 0) ?: null,
+        'activity_type_id' => (int)($_POST['activity_type_id'] ?? 0) ?: null,
+        'competency_id'    => (int)($_POST['competency_id'] ?? 0) ?: null,
+        'module_id'        => (int)($_POST['module_id'] ?? 0) ?: null,
+        'lesson_id'        => (int)($_POST['lesson_id'] ?? 0) ?: null,
     ];
 
     if (!$data['title'])     $errors[] = 'Le titre est requis.';
@@ -100,20 +104,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $filePath,
             $data['content_url'] ?: null,
             $data['formation_id'],
+            $data['activity_type_id'],
+            $data['competency_id'],
+            $data['module_id'],
+            $data['lesson_id'],
         ];
 
         if ($postEditId) {
             $pdo->prepare("
                 UPDATE case_studies SET title=?,description=?,file_type=?,file_path=?,
-                content_url=?,formation_id=?,updated_at=NOW() WHERE id=?
+                content_url=?,formation_id=?,activity_type_id=?,competency_id=?,
+                module_id=?,lesson_id=?,updated_at=NOW() WHERE id=?
             ")->execute(array_merge($row, [$postEditId]));
             auditLog('case_study_updated', 'case_study', $postEditId);
             setFlash('success', 'Étude de cas modifiée.');
         } else {
             $row[] = $userId;
             $pdo->prepare("
-                INSERT INTO case_studies (title,description,file_type,file_path,content_url,formation_id,created_by)
-                VALUES (?,?,?,?,?,?,?)
+                INSERT INTO case_studies
+                  (title,description,file_type,file_path,content_url,formation_id,
+                   activity_type_id,competency_id,module_id,lesson_id,created_by)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
             ")->execute($row);
             $newId = (int)$pdo->lastInsertId();
             auditLog('case_study_created', 'case_study', $newId);
@@ -129,6 +140,31 @@ if ($isEdit && $cs['file_type'] === 'pdf' && $cs['file_path']) {
     $dec = json_decode($cs['file_path'], true);
     $existingPdfs = is_array($dec) ? $dec
         : [['path' => $cs['file_path'], 'name' => pathinfo($cs['file_path'], PATHINFO_FILENAME)]];
+}
+
+// Pré-chargement cascade (mode édition)
+$initModules       = [];
+$initActivityTypes = [];
+$initCompetencies  = [];
+$initLessons       = [];
+if ($cs['formation_id']) {
+    $s = $pdo->prepare("SELECT id, title FROM modules WHERE formation_id = ? ORDER BY order_num, title");
+    $s->execute([$cs['formation_id']]);
+    $initModules = $s->fetchAll();
+
+    $s = $pdo->prepare("SELECT at.id, at.code, at.title FROM activity_types at INNER JOIN formations f ON f.rncp_title_id = at.rncp_title_id WHERE f.id = ? ORDER BY at.order_num, at.code");
+    $s->execute([$cs['formation_id']]);
+    $initActivityTypes = $s->fetchAll();
+}
+if ($cs['activity_type_id']) {
+    $s = $pdo->prepare("SELECT id, code, title FROM competencies WHERE activity_type_id = ? ORDER BY order_num, code");
+    $s->execute([$cs['activity_type_id']]);
+    $initCompetencies = $s->fetchAll();
+}
+if ($cs['module_id']) {
+    $s = $pdo->prepare("SELECT id, title FROM lessons WHERE module_id = ? ORDER BY order_num, title");
+    $s->execute([$cs['module_id']]);
+    $initLessons = $s->fetchAll();
 }
 
 $contentTypes = [
@@ -309,20 +345,11 @@ renderTopbar($pageTitle, [
 
       <!-- Sidebar -->
       <div style="display:flex;flex-direction:column;gap:16px;position:sticky;top:80px">
+
+        <!-- Publication -->
         <div class="card">
           <div class="card-header"><h3 class="card-title">Publication</h3></div>
-          <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
-            <div class="form-group" style="margin-bottom:0">
-              <label class="form-label">Formation liée <span style="color:var(--text-muted)">(optionnel)</span></label>
-              <select name="formation_id" class="form-control" style="font-size:13px">
-                <option value="">— Aucune —</option>
-                <?php foreach ($formations as $f): ?>
-                <option value="<?= $f['id'] ?>" <?= $cs['formation_id'] == $f['id'] ? 'selected' : '' ?>>
-                  <?= e(mb_substr($f['title'],0,40)) ?>
-                </option>
-                <?php endforeach; ?>
-              </select>
-            </div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
             <button type="submit" class="btn btn-primary w-full" style="justify-content:center">
               <i class="fas fa-save"></i> <?= $isEdit ? 'Enregistrer' : 'Importer' ?>
             </button>
@@ -337,6 +364,83 @@ renderTopbar($pageTitle, [
             </a>
           </div>
         </div>
+
+        <!-- Rattachements pédagogiques -->
+        <div class="card">
+          <div class="card-header"><h3 class="card-title"><i class="fas fa-sitemap" style="margin-right:7px;color:var(--primary-light)"></i>Rattachements</h3></div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
+
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Formation</label>
+              <select name="formation_id" id="sel-formation" class="form-control" style="font-size:12px" onchange="onFormationChange(this.value)">
+                <option value="">— Aucune —</option>
+                <?php foreach ($formations as $f): ?>
+                <option value="<?= $f['id'] ?>" <?= $cs['formation_id'] == $f['id'] ? 'selected' : '' ?>>
+                  <?= e(mb_substr($f['title'],0,38)) ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <div id="grp-module" style="display:<?= !empty($initModules) ? '' : 'none' ?>">
+              <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Module de formation</label>
+              <select name="module_id" id="sel-module" class="form-control" style="font-size:12px" onchange="onModuleChange(this.value)">
+                <option value="">— Aucun —</option>
+                <?php foreach ($initModules as $m): ?>
+                <option value="<?= $m['id'] ?>" <?= $cs['module_id'] == $m['id'] ? 'selected' : '' ?>>
+                  <?= e(mb_substr($m['title'],0,38)) ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <div id="grp-lesson" style="display:<?= !empty($initLessons) ? '' : 'none' ?>">
+              <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Capsule de cours</label>
+              <select name="lesson_id" id="sel-lesson" class="form-control" style="font-size:12px">
+                <option value="">— Aucune —</option>
+                <?php foreach ($initLessons as $l): ?>
+                <option value="<?= $l['id'] ?>" <?= $cs['lesson_id'] == $l['id'] ? 'selected' : '' ?>>
+                  <?= e(mb_substr($l['title'],0,38)) ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <div style="border-top:1px solid var(--border);margin:0 -16px"></div>
+
+            <div id="grp-at" style="display:<?= !empty($initActivityTypes) ? '' : 'none' ?>">
+              <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Bloc / Activité type</label>
+              <select name="activity_type_id" id="sel-at" class="form-control" style="font-size:12px" onchange="onATChange(this.value)">
+                <option value="">— Aucun —</option>
+                <?php foreach ($initActivityTypes as $at): ?>
+                <option value="<?= $at['id'] ?>" <?= $cs['activity_type_id'] == $at['id'] ? 'selected' : '' ?>>
+                  <?= e($at['code'] . ' — ' . mb_substr($at['title'],0,30)) ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <div id="grp-competency" style="display:<?= !empty($initCompetencies) ? '' : 'none' ?>">
+              <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Compétence</label>
+              <select name="competency_id" id="sel-competency" class="form-control" style="font-size:12px">
+                <option value="">— Aucune —</option>
+                <?php foreach ($initCompetencies as $co): ?>
+                <option value="<?= $co['id'] ?>" <?= $cs['competency_id'] == $co['id'] ? 'selected' : '' ?>>
+                  <?= e($co['code'] . ' — ' . mb_substr($co['title'],0,30)) ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+
+            <?php if (empty($initModules) && empty($initActivityTypes)): ?>
+            <p style="font-size:11px;color:var(--text-faint);text-align:center;margin:0">
+              Sélectionnez une formation pour voir les modules, blocs et compétences disponibles.
+            </p>
+            <?php endif; ?>
+
+          </div>
+        </div>
+
       </div>
 
     </div>
@@ -523,5 +627,71 @@ function updateExistingPdfNumbers() {
 
 // ── Init ──────────────────────────────────────────────────────
 updateZone('<?= e($cs['file_type']) ?>');
+
+// ── Cascade AJAX ──────────────────────────────────────────────
+var AJAX_URL = '<?= url('teacher/case_studies/ajax.php') ?>';
+
+function showGrp(id, show) {
+  document.getElementById(id).style.display = show ? '' : 'none';
+}
+
+function populateSel(selId, items, preselectId, labelFn) {
+  var sel = document.getElementById(selId);
+  while (sel.options.length > 1) sel.remove(1);
+  items.forEach(function(item) {
+    var label = labelFn ? labelFn(item) : item.title;
+    var opt = new Option(label, item.id);
+    if (String(item.id) === String(preselectId)) opt.selected = true;
+    sel.add(opt);
+  });
+}
+
+async function onFormationChange(fid) {
+  populateSel('sel-module', [],    0); showGrp('grp-module', false);
+  populateSel('sel-lesson', [],    0); showGrp('grp-lesson', false);
+  populateSel('sel-at',     [],    0); showGrp('grp-at', false);
+  populateSel('sel-competency', [],0); showGrp('grp-competency', false);
+  var hint = document.querySelector('#grp-hint');
+  if (hint) hint.style.display = fid ? 'none' : '';
+  if (!fid) return;
+  try {
+    var [mods, ats] = await Promise.all([
+      fetch(AJAX_URL + '?action=modules&formation_id=' + fid).then(function(r){return r.json();}),
+      fetch(AJAX_URL + '?action=activity_types&formation_id=' + fid).then(function(r){return r.json();})
+    ]);
+    if (mods.length) {
+      populateSel('sel-module', mods, 0);
+      showGrp('grp-module', true);
+    }
+    if (ats.length) {
+      populateSel('sel-at', ats, 0, function(i){ return i.code + ' — ' + i.title; });
+      showGrp('grp-at', true);
+    }
+  } catch(e) {}
+}
+
+async function onModuleChange(mid) {
+  populateSel('sel-lesson', [], 0); showGrp('grp-lesson', false);
+  if (!mid) return;
+  try {
+    var lessons = await fetch(AJAX_URL + '?action=lessons&module_id=' + mid).then(function(r){return r.json();});
+    if (lessons.length) {
+      populateSel('sel-lesson', lessons, 0);
+      showGrp('grp-lesson', true);
+    }
+  } catch(e) {}
+}
+
+async function onATChange(atid) {
+  populateSel('sel-competency', [], 0); showGrp('grp-competency', false);
+  if (!atid) return;
+  try {
+    var comps = await fetch(AJAX_URL + '?action=competencies&activity_type_id=' + atid).then(function(r){return r.json();});
+    if (comps.length) {
+      populateSel('sel-competency', comps, 0, function(i){ return i.code + ' — ' + i.title; });
+      showGrp('grp-competency', true);
+    }
+  } catch(e) {}
+}
 </script>
 <?php renderFooter(); ?>
