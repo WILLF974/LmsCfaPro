@@ -24,6 +24,21 @@ $pdo->exec("
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
+// Table des ressources complémentaires
+$pdo->exec("
+    CREATE TABLE IF NOT EXISTS case_study_resources (
+        id             INT AUTO_INCREMENT PRIMARY KEY,
+        case_study_id  INT NOT NULL,
+        title          VARCHAR(255) NOT NULL,
+        type           VARCHAR(30) NOT NULL DEFAULT 'other',
+        file_path      TEXT DEFAULT NULL,
+        url            VARCHAR(500) DEFAULT NULL,
+        file_size      INT DEFAULT NULL,
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_cs (case_study_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+");
+
 // Ajouter les colonnes de rattachement si absentes (migration non-destructive)
 foreach ([
     "ALTER TABLE case_studies ADD COLUMN activity_type_id INT NULL",

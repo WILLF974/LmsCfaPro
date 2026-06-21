@@ -26,6 +26,14 @@ if (!isTeacher() && !isAdmin() && !isPedagogy()) {
     }
 }
 
+// Ressources complémentaires
+$resources = [];
+try {
+    $s = $pdo->prepare('SELECT * FROM case_study_resources WHERE case_study_id = ? ORDER BY id');
+    $s->execute([$id]);
+    $resources = $s->fetchAll();
+} catch (PDOException $e) {}
+
 // Décodage PDF multi
 $isMultiPdf = false;
 $pdfPages   = [];
@@ -209,6 +217,44 @@ renderTopbar(e($cs['title']), [
     <div class="empty-state"><p>Aucun fichier disponible.</p></div>
     <?php endif; ?>
 
+  <?php endif; ?>
+
+  <?php if (!empty($resources)): ?>
+  <?php
+  $resIcons = [
+      'pdf'        => ['icon'=>'file-pdf',        'color'=>'#ef4444'],
+      'word'       => ['icon'=>'file-word',       'color'=>'#3b82f6'],
+      'excel'      => ['icon'=>'file-excel',      'color'=>'#10b981'],
+      'powerpoint' => ['icon'=>'file-powerpoint', 'color'=>'#f97316'],
+      'video'      => ['icon'=>'play-circle',     'color'=>'#ef4444'],
+      'image'      => ['icon'=>'image',           'color'=>'#a855f7'],
+      'link'       => ['icon'=>'link',            'color'=>'#0ea5e9'],
+      'other'      => ['icon'=>'file',            'color'=>'var(--text-muted)'],
+  ];
+  ?>
+  <div class="card" style="margin-top:20px">
+    <div class="card-header">
+      <h3 class="card-title"><i class="fas fa-paperclip" style="margin-right:8px;color:var(--primary-light)"></i>Ressources complémentaires</h3>
+    </div>
+    <div class="card-body" style="display:flex;flex-wrap:wrap;gap:10px">
+      <?php foreach ($resources as $res):
+        $ri = $resIcons[$res['type']] ?? $resIcons['other'];
+        $isLink = !empty($res['url']);
+        $href   = $isLink ? $res['url'] : uploadUrl($res['file_path']);
+      ?>
+      <a href="<?= e($href) ?>" target="_blank" rel="noopener noreferrer"
+        class="btn btn-secondary"
+        style="gap:8px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+        title="<?= e($res['title']) ?>">
+        <i class="fas fa-<?= $ri['icon'] ?>" style="color:<?= $ri['color'] ?>;flex-shrink:0"></i>
+        <span style="overflow:hidden;text-overflow:ellipsis"><?= e(mb_substr($res['title'],0,40)) ?></span>
+        <?php if (!empty($res['file_size'])): ?>
+        <span style="color:var(--text-faint);font-size:11px;flex-shrink:0"><?= formatFileSize($res['file_size']) ?></span>
+        <?php endif; ?>
+      </a>
+      <?php endforeach; ?>
+    </div>
+  </div>
   <?php endif; ?>
 
 </div>

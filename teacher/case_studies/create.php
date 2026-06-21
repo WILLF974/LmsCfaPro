@@ -128,6 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ")->execute(array_merge($row, [$postEditId]));
             auditLog('case_study_updated', 'case_study', $postEditId);
             setFlash('success', 'Étude de cas modifiée.');
+            $csId = $postEditId;
         } else {
             $row[] = $userId;
             $pdo->prepare("
@@ -137,10 +138,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    duration_minutes,xp_reward,created_by)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             ")->execute($row);
-            $newId = (int)$pdo->lastInsertId();
-            auditLog('case_study_created', 'case_study', $newId);
+            $csId = (int)$pdo->lastInsertId();
+            auditLog('case_study_created', 'case_study', $csId);
             setFlash('success', 'Étude de cas importée avec succès.');
         }
+
+        // ── Ressources complémentaires ──────────────────────────
+        // 1. Supprimer les ressources retirées en édition
+        if ($postEditId) {
+            $keptIds = array_filter(array_map('intval', $_POST['existing_resource_ids'] ?? []));
+            if (empty($keptIds)) {
+                $pdo->prepare('DELETE FROM case_study_resources WHERE case_study_id = ?')->execute([$csId]);
+            } else {
+                $ph = implode(',', array_fill(0, count($keptIds), '?'));
+                $pdo->prepare("DELETE FROM case_study_resources WHERE case_study_id = ? AND id NOT IN ($ph)")
+                    ->execute(array_merge([$csId], $keptIds));
+            }
+        }
+
+        // 2. Nouveaux fichiers
+        foreach (($_FILES['new_res_files']['name'] ?? []) as $i => $rName) {
+            if (empty($rName) || $_FILES['new_res_files']['error'][$i] !== UPLOAD_ERR_OK) continue;
+            $rFile = [
+                'name'     => $rName,
+                'tmp_name' => $_FILES['new_res_files']['tmp_name'][$i],
+                'error'    => $_FILES['new_res_files']['error'][$i],
+                'size'     => $_FILES['new_res_files']['size'][$i],
+                'type'     => $_FILES['new_res_files']['type'][$i],
+            ];
+            $upload = uploadFile($rFile, 'case_studies/resources', ALLOWED_DOC_TYPES, MAX_UPLOAD_SIZE);
+            if ($upload['success']) {
+                $ext   = strtolower(pathinfo($rName, PATHINFO_EXTENSION));
+                $rType = csResourceType($ext);
+                $title = trim($_POST['new_res_titles'][$i] ?? '') ?: pathinfo($rName, PATHINFO_FILENAME);
+                $pdo->prepare('INSERT INTO case_study_resources (case_study_id,title,type,file_path,file_size) VALUES (?,?,?,?,?)')
+                    ->execute([$csId, $title, $rType, $upload['path'], (int)$rFile['size']]);
+            }
+        }
+
+        // 3. Nouveaux liens web
+        foreach (($_POST['new_res_urls'] ?? []) as $i => $linkUrl) {
+            $linkUrl = trim($linkUrl);
+            if (!$linkUrl) continue;
+            $title = trim($_POST['new_res_link_titles'][$i] ?? '') ?: $linkUrl;
+            $pdo->prepare('INSERT INTO case_study_resources (case_study_id,title,type,url) VALUES (?,?,?,?)')
+                ->execute([$csId, mb_substr($title, 0, 255), 'link', $linkUrl]);
+        }
+
         redirect(url('teacher/case_studies/index.php'));
     }
 }
@@ -176,6 +220,26 @@ if ($cs['module_id']) {
     $s = $pdo->prepare("SELECT id, title FROM lessons WHERE module_id = ? ORDER BY order_num, title");
     $s->execute([$cs['module_id']]);
     $initLessons = $s->fetchAll();
+}
+
+// Ressources complémentaires existantes (mode édition)
+$existingResources = [];
+if ($isEdit) {
+    $s = $pdo->prepare('SELECT * FROM case_study_resources WHERE case_study_id = ? ORDER BY id');
+    $s->execute([$editId]);
+    $existingResources = $s->fetchAll();
+}
+
+function csResourceType(string $ext): string {
+    return match(true) {
+        $ext === 'pdf'                               => 'pdf',
+        in_array($ext, ['doc','docx'])               => 'word',
+        in_array($ext, ['xls','xlsx'])               => 'excel',
+        in_array($ext, ['ppt','pptx'])               => 'powerpoint',
+        in_array($ext, ['mp4','webm','avi','mov'])   => 'video',
+        in_array($ext, ['jpg','jpeg','png','gif','webp','svg']) => 'image',
+        default                                      => 'other',
+    };
 }
 
 $contentTypes = [
@@ -348,6 +412,91 @@ renderTopbar($pageTitle, [
                 </div>
               </div>
             </div>
+
+          </div>
+        </div>
+
+        <!-- ── Ressources complémentaires ─────────────────────── -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-paperclip" style="margin-right:8px;color:var(--primary-light)"></i>Ressources complémentaires</h3>
+            <p class="card-subtitle">Documents, liens ou fichiers annexes utiles à la réalisation de l'étude de cas</p>
+          </div>
+          <div class="card-body">
+
+            <?php
+            $resIcons = [
+                'pdf'         => ['icon'=>'file-pdf',        'color'=>'#ef4444'],
+                'word'        => ['icon'=>'file-word',       'color'=>'#3b82f6'],
+                'excel'       => ['icon'=>'file-excel',      'color'=>'#10b981'],
+                'powerpoint'  => ['icon'=>'file-powerpoint', 'color'=>'#f97316'],
+                'video'       => ['icon'=>'play-circle',     'color'=>'#ef4444'],
+                'image'       => ['icon'=>'image',           'color'=>'#a855f7'],
+                'link'        => ['icon'=>'link',            'color'=>'#0ea5e9'],
+                'other'       => ['icon'=>'file',            'color'=>'var(--text-muted)'],
+            ];
+            ?>
+
+            <?php if (!empty($existingResources)): ?>
+            <!-- Ressources existantes -->
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:8px">
+              Ressources actuelles
+            </div>
+            <div id="existing-res-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px">
+              <?php foreach ($existingResources as $res):
+                $ri = $resIcons[$res['type']] ?? $resIcons['other'];
+              ?>
+              <div class="existing-res-row" style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)">
+                <input type="hidden" name="existing_resource_ids[]" value="<?= (int)$res['id'] ?>">
+                <i class="fas fa-<?= $ri['icon'] ?>" style="color:<?= $ri['color'] ?>;font-size:14px;flex-shrink:0;width:16px"></i>
+                <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($res['title']) ?>">
+                  <?= e(mb_substr($res['title'],0,60)) ?>
+                </span>
+                <?php if ($res['file_size']): ?>
+                <span style="font-size:11px;color:var(--text-faint);flex-shrink:0"><?= formatFileSize($res['file_size']) ?></span>
+                <?php endif; ?>
+                <?php if ($res['file_path']): ?>
+                <a href="<?= e(uploadUrl($res['file_path'])) ?>" target="_blank" class="btn btn-ghost btn-sm" style="padding:3px 8px" title="Ouvrir"><i class="fas fa-eye"></i></a>
+                <?php elseif ($res['url']): ?>
+                <a href="<?= e($res['url']) ?>" target="_blank" class="btn btn-ghost btn-sm" style="padding:3px 8px;max-width:140px;overflow:hidden;text-overflow:ellipsis" title="<?= e($res['url']) ?>">
+                  <i class="fas fa-external-link-alt"></i>
+                </a>
+                <?php endif; ?>
+                <button type="button" onclick="deleteExistingRes(this)" class="btn btn-ghost btn-sm" style="color:var(--danger);padding:3px 8px;flex-shrink:0" title="Retirer">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
+              <?php endforeach; ?>
+            </div>
+            <div style="border-top:1px solid var(--border);margin:0 -16px 18px"></div>
+            <?php endif; ?>
+
+            <!-- Ajout de fichiers -->
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:8px">
+              Ajouter des fichiers
+            </div>
+            <input type="file" name="new_res_files[]" id="new-res-input" multiple style="display:none"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.mp4,.webm,.jpg,.jpeg,.png,.gif">
+            <div id="new-res-dropzone"
+              style="border:2px dashed var(--border);border-radius:var(--radius);padding:22px;text-align:center;cursor:pointer;transition:.2s"
+              onclick="document.getElementById('new-res-input').click()"
+              onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
+              <i class="fas fa-cloud-upload-alt" style="font-size:26px;color:var(--text-muted);margin-bottom:6px;display:block"></i>
+              <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px">Cliquer ou glisser des fichiers</div>
+              <div style="font-size:11px;color:var(--text-muted)">PDF, Word, Excel, PowerPoint, vidéo, image</div>
+            </div>
+            <div id="new-res-list" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
+            <!-- Inputs cachés pour les titres des nouveaux fichiers (synchronisés par JS) -->
+            <div id="new-res-titles-container" style="display:none"></div>
+
+            <!-- Ajout de liens web -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;margin-bottom:8px">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Liens web</span>
+              <button type="button" onclick="addLinkRow()" class="btn btn-ghost btn-sm" style="font-size:12px">
+                <i class="fas fa-plus" style="margin-right:5px;color:var(--primary)"></i>Ajouter un lien
+              </button>
+            </div>
+            <div id="link-rows" style="display:flex;flex-direction:column;gap:8px"></div>
 
           </div>
         </div>
@@ -638,6 +787,109 @@ function updateExistingPdfNumbers() {
 
 // ── Init ──────────────────────────────────────────────────────
 updateZone('<?= e($cs['file_type']) ?>');
+
+// ── Ressources complémentaires ────────────────────────────────
+const RES_ICONS = {
+  pdf:'file-pdf',doc:'file-word',docx:'file-word',
+  xls:'file-excel',xlsx:'file-excel',
+  ppt:'file-powerpoint',pptx:'file-powerpoint',
+  mp4:'play-circle',webm:'play-circle',
+  jpg:'image',jpeg:'image',png:'image',gif:'image',webp:'image',svg:'image',
+};
+const RES_COLORS = {
+  'file-pdf':'#ef4444','file-word':'#3b82f6','file-excel':'#10b981',
+  'file-powerpoint':'#f97316','play-circle':'#ef4444','image':'#a855f7',
+};
+
+var _newResFiles  = []; // accumule les fichiers sélectionnés
+var _linkRowIdx   = 0;
+
+// Dropzone multi-fichiers
+(function() {
+  var inp = document.getElementById('new-res-input');
+  var dz  = document.getElementById('new-res-dropzone');
+  if (!inp) return;
+  inp.addEventListener('change', function() { addResFiles(Array.from(inp.files)); });
+  dz.addEventListener('dragover',  function(e){ e.preventDefault(); dz.style.borderColor='var(--primary)'; });
+  dz.addEventListener('dragleave', function()  { dz.style.borderColor='var(--border)'; });
+  dz.addEventListener('drop', function(e) {
+    e.preventDefault(); dz.style.borderColor='var(--border)';
+    addResFiles(Array.from(e.dataTransfer.files));
+  });
+})();
+
+function addResFiles(newFiles) {
+  newFiles.forEach(function(f) {
+    if (!_newResFiles.find(function(e){ return e.name===f.name && e.size===f.size; }))
+      _newResFiles.push(f);
+  });
+  syncResInput();
+  renderResList();
+}
+
+function syncResInput() {
+  var inp = document.getElementById('new-res-input');
+  var dt  = new DataTransfer();
+  _newResFiles.forEach(function(f){ dt.items.add(f); });
+  inp.files = dt.files;
+}
+
+function renderResList() {
+  var list = document.getElementById('new-res-list');
+  var titlesContainer = document.getElementById('new-res-titles-container');
+  list.innerHTML = '';
+  titlesContainer.innerHTML = '';
+  _newResFiles.forEach(function(f, i) {
+    var ext  = f.name.split('.').pop().toLowerCase();
+    var icon = RES_ICONS[ext] || 'file';
+    var col  = RES_COLORS[icon] || 'var(--text-muted)';
+    var size = f.size >= 1048576 ? (f.size/1048576).toFixed(1)+' Mo' : Math.round(f.size/1024)+' Ko';
+    var defaultTitle = f.name.replace(/\.[^.]+$/, '');
+    // Titre input (hidden container, submitted with form)
+    var titleId = 'nrt-' + i;
+    titlesContainer.insertAdjacentHTML('beforeend',
+      '<input type="text" name="new_res_titles[]" id="' + titleId + '" value="' + defaultTitle.replace(/"/g,'&quot;') + '">');
+    // Visible row
+    list.insertAdjacentHTML('beforeend', `
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)">
+        <i class="fas fa-${icon}" style="color:${col};font-size:14px;flex-shrink:0;width:16px"></i>
+        <input type="text" value="${defaultTitle.replace(/"/g,'&quot;')}" placeholder="Titre du document"
+          class="form-control" style="flex:1;font-size:12px;padding:4px 8px"
+          oninput="document.getElementById('${titleId}').value=this.value">
+        <span style="font-size:11px;color:var(--text-faint);flex-shrink:0">${size}</span>
+        <button type="button" onclick="removeResFile(${i})" class="btn btn-ghost btn-sm" style="color:var(--danger);padding:3px 8px;flex-shrink:0"><i class="fas fa-times"></i></button>
+      </div>
+    `);
+  });
+}
+
+function removeResFile(idx) {
+  _newResFiles.splice(idx, 1);
+  syncResInput();
+  renderResList();
+}
+
+// Supprimer une ressource existante (retire la ligne + le hidden input)
+function deleteExistingRes(btn) {
+  if (!confirm('Retirer cette ressource de l\'étude de cas ?')) return;
+  btn.closest('.existing-res-row').remove();
+}
+
+// Ajouter un lien web
+function addLinkRow() {
+  _linkRowIdx++;
+  var idx = _linkRowIdx;
+  document.getElementById('link-rows').insertAdjacentHTML('beforeend', `
+    <div id="lr-${idx}" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)">
+      <i class="fas fa-link" style="color:#0ea5e9;flex-shrink:0;width:16px"></i>
+      <div style="flex:1;display:flex;flex-direction:column;gap:5px">
+        <input type="text" name="new_res_link_titles[]" placeholder="Titre de la ressource (ex : Guide méthodologique)" class="form-control" style="font-size:12px;padding:4px 8px">
+        <input type="url"  name="new_res_urls[]"        placeholder="https://..." class="form-control" style="font-size:12px;padding:4px 8px">
+      </div>
+      <button type="button" onclick="document.getElementById('lr-${idx}').remove()" class="btn btn-ghost btn-sm" style="color:var(--danger);padding:3px 8px;flex-shrink:0"><i class="fas fa-times"></i></button>
+    </div>
+  `);
+}
 
 // ── Cascade AJAX ──────────────────────────────────────────────
 var AJAX_URL = '<?= url('teacher/case_studies/ajax.php') ?>';
