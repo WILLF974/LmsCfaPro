@@ -54,10 +54,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // File upload
     $filePath = $lesson['file_path'] ?? null;
 
-    if ($data['content_type'] === 'pdf' && !empty($_FILES['pdf_files']['name'][0])) {
-        // ── Multi-PDF upload ──────────────────────────────────────
+    if ($data['content_type'] === 'pdf') {
+        // ── Multi-PDF : existants conservés + nouveaux en append ──
         $pdfEntries = [];
-        foreach ($_FILES['pdf_files']['name'] as $i => $pdfName) {
+
+        // 1. PDFs existants (hidden inputs soumis dans leur ordre courant)
+        foreach (($_POST['existing_pdf_paths'] ?? []) as $idx => $path) {
+            $path = trim($path);
+            if (!$path) continue;
+            $name = trim($_POST['existing_pdf_names'][$idx] ?? '') ?: pathinfo($path, PATHINFO_FILENAME);
+            $pdfEntries[] = ['path' => $path, 'name' => $name];
+        }
+
+        // 2. Nouveaux PDFs uploadés (ajoutés à la suite)
+        foreach (($_FILES['pdf_files']['name'] ?? []) as $i => $pdfName) {
             if (empty($pdfName) || $_FILES['pdf_files']['error'][$i] !== UPLOAD_ERR_OK) continue;
             $pdfFile = [
                 'name'     => $pdfName,
@@ -71,12 +81,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $customName = trim($_POST['pdf_names'][$i] ?? '') ?: pathinfo($pdfName, PATHINFO_FILENAME);
                 $pdfEntries[] = ['path' => $upload['path'], 'name' => $customName];
             } else {
-                $errors[] = 'PDF n°' . ($i + 1) . ' : ' . $upload['error'];
+                $errors[] = 'Nouveau PDF n°' . ($i + 1) . ' : ' . $upload['error'];
             }
         }
-        if (!empty($pdfEntries)) {
-            $filePath = json_encode($pdfEntries, JSON_UNESCAPED_UNICODE);
-        }
+
+        $filePath = !empty($pdfEntries) ? json_encode($pdfEntries, JSON_UNESCAPED_UNICODE) : null;
     } elseif (!empty($_FILES['lesson_file']['name'])) {
         // ── Fichier unique (autres types) ─────────────────────────
         $upload = uploadFile($_FILES['lesson_file'], 'courses', ALLOWED_DOC_TYPES, MAX_UPLOAD_SIZE);
@@ -303,23 +312,41 @@ renderTopbar($pageTitle, [['Enseignant', url('teacher/index.php')], ['Capsules',
                     : [['path' => $lesson['file_path'], 'name' => pathinfo($lesson['file_path'], PATHINFO_FILENAME)]];
             }
             ?>
-            <div id="zone-pdf-multi" style="display:none">
+            <div id="zone-pdf-multi" style="display:none" data-has-existing="<?= $existingPdfs ? 'true' : 'false' ?>">
+
               <?php if ($existingPdfs): ?>
-              <div style="background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:var(--radius);padding:14px;margin-bottom:16px">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--primary);letter-spacing:.05em;margin-bottom:10px">
-                  <i class="fas fa-file-pdf" style="margin-right:5px"></i>PDFs actuellement en place
-                </div>
+              <!-- PDFs existants — liste interactive -->
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--primary);letter-spacing:.05em;margin-bottom:10px">
+                <i class="fas fa-file-pdf" style="margin-right:5px"></i>PDFs de la capsule
+              </div>
+              <div id="existing-pdf-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
                 <?php foreach ($existingPdfs as $i => $ep): ?>
-                <div style="display:flex;align-items:center;gap:10px;padding:8px;background:var(--bg-elevated);border-radius:6px;margin-bottom:6px">
-                  <span style="width:22px;height:22px;border-radius:5px;background:#ef4444;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:white;flex-shrink:0"><?= $i+1 ?></span>
-                  <i class="fas fa-file-pdf" style="color:#ef4444;font-size:14px;flex-shrink:0"></i>
-                  <span style="flex:1;font-size:13px;color:var(--text)"><?= e($ep['name']) ?></span>
-                  <a href="<?= e(uploadUrl($ep['path'])) ?>" target="_blank" class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px"><i class="fas fa-eye"></i></a>
+                <div class="existing-pdf-row" style="display:flex;align-items:center;gap:8px;padding:9px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)">
+                  <input type="hidden" name="existing_pdf_paths[]" value="<?= e($ep['path']) ?>">
+                  <span class="row-num" style="width:24px;height:24px;border-radius:5px;background:#ef4444;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:white;flex-shrink:0"><?= $i+1 ?></span>
+                  <i class="fas fa-file-pdf" style="color:#ef4444;font-size:13px;flex-shrink:0"></i>
+                  <input type="text" name="existing_pdf_names[]" value="<?= e($ep['name']) ?>" class="form-control" style="flex:1;font-size:13px;padding:5px 9px" placeholder="Nom du document">
+                  <div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0">
+                    <button type="button" onclick="moveExistingPdf(this,-1)" class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:10px" title="Remonter"><i class="fas fa-chevron-up"></i></button>
+                    <button type="button" onclick="moveExistingPdf(this,1)"  class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:10px" title="Descendre"><i class="fas fa-chevron-down"></i></button>
+                  </div>
+                  <a href="<?= e(uploadUrl($ep['path'])) ?>" target="_blank" class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px;flex-shrink:0" title="Ouvrir"><i class="fas fa-eye"></i></a>
+                  <button type="button" onclick="deleteExistingPdf(this)" class="btn btn-ghost btn-sm" style="color:var(--danger);padding:4px 8px;flex-shrink:0" title="Supprimer ce PDF"><i class="fas fa-trash"></i></button>
                 </div>
                 <?php endforeach; ?>
-                <p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">Uploadez de nouveaux fichiers ci-dessous pour remplacer l'ensemble des PDFs.</p>
+              </div>
+              <div style="display:flex;gap:8px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+                <button type="button" onclick="deleteAllExistingPdfs()" class="btn btn-ghost btn-sm" style="color:var(--danger);font-size:12px">
+                  <i class="fas fa-trash-alt" style="margin-right:5px"></i>Supprimer tous les PDFs
+                </button>
+              </div>
+
+              <!-- Ajouter de nouveaux PDFs à la suite -->
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.05em;margin-bottom:10px">
+                <i class="fas fa-plus" style="margin-right:5px"></i>Ajouter de nouveaux PDFs à la suite
               </div>
               <?php endif; ?>
+
               <div id="pdf-slots" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
               <button type="button" onclick="addPdfSlot()" class="btn btn-ghost btn-sm">
                 <i class="fas fa-plus-circle" style="color:var(--primary);margin-right:6px"></i>Ajouter un PDF
@@ -463,7 +490,9 @@ function updateContentZone(type) {
     zoneUrl.style.display = 'none'; zoneText.style.display = 'none';
     if (zonePdfMulti) {
       zonePdfMulti.style.display = 'block';
-      if (!document.querySelector('#pdf-slots .pdf-slot')) addPdfSlot();
+      // En création (pas d'existants) : ajouter un slot vide si aucun présent
+      var hasExisting = zonePdfMulti.dataset.hasExisting === 'true';
+      if (!hasExisting && !document.querySelector('#pdf-slots .pdf-slot')) addPdfSlot();
     }
   } else if (type === 'link') {
     zoneUrl.style.display = 'block'; zoneText.style.display = 'none';
@@ -548,9 +577,51 @@ function removePdfSlot(slotId) {
 }
 
 function updateSlotNumbers() {
+  var existingCount = document.querySelectorAll('#existing-pdf-list .existing-pdf-row').length;
   document.querySelectorAll('#pdf-slots .pdf-slot').forEach(function(slot, i) {
-    var n = slot.querySelector('.slot-num'); if (n) n.textContent = i + 1;
+    var n = slot.querySelector('.slot-num'); if (n) n.textContent = existingCount + i + 1;
   });
+}
+
+// ── Gestion des PDFs existants (mode édition) ─────────────────
+function moveExistingPdf(btn, dir) {
+  var row = btn.closest('.existing-pdf-row');
+  var list = document.getElementById('existing-pdf-list');
+  var rows = Array.from(list.querySelectorAll('.existing-pdf-row'));
+  var idx  = rows.indexOf(row);
+  var newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= rows.length) return;
+  if (dir === -1) list.insertBefore(row, rows[newIdx]);
+  else list.insertBefore(rows[newIdx], row);
+  updateExistingPdfNumbers();
+}
+
+function deleteExistingPdf(btn) {
+  if (!confirm('Supprimer ce PDF de la capsule ?')) return;
+  btn.closest('.existing-pdf-row').remove();
+  updateExistingPdfNumbers();
+  updateSlotNumbers();
+}
+
+function deleteAllExistingPdfs() {
+  var list = document.getElementById('existing-pdf-list');
+  if (!list) return;
+  var count = list.querySelectorAll('.existing-pdf-row').length;
+  if (!count) return;
+  if (!confirm('Supprimer les ' + count + ' PDF(s) de la capsule ?')) return;
+  list.querySelectorAll('.existing-pdf-row').forEach(function(r) { r.remove(); });
+  updateSlotNumbers();
+  // Ajouter un slot vide si plus rien
+  if (!document.querySelector('#pdf-slots .pdf-slot')) addPdfSlot();
+}
+
+function updateExistingPdfNumbers() {
+  var list = document.getElementById('existing-pdf-list');
+  if (!list) return;
+  list.querySelectorAll('.existing-pdf-row').forEach(function(row, i) {
+    var n = row.querySelector('.row-num'); if (n) n.textContent = i + 1;
+  });
+  updateSlotNumbers();
 }
 
 // Rich text editor
