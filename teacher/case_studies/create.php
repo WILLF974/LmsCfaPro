@@ -313,7 +313,12 @@ renderTopbar($pageTitle, [
     [$isEdit ? 'Modifier' : 'Importer', '']
 ]);
 ?>
-<div class="page-content fade-in">
+<style>
+/* Override du scroll interne de .page-content pour cette page uniquement :
+   le scroll se fait au niveau du viewport (comportement attendu par l'utilisateur). */
+.page-content { overflow: visible !important; }
+</style>
+<div class="page-content fade-in" style="overflow:visible;min-height:calc(100vh - 64px)">
   <?php foreach ($errors as $err): ?>
   <div class="alert alert-error"><i class="fas fa-times-circle"></i> <?= e($err) ?></div>
   <?php endforeach; ?>
@@ -557,56 +562,53 @@ renderTopbar($pageTitle, [
 
       </div><!-- /Main -->
 
-      <!-- Sidebar -->
-      <div style="display:flex;flex-direction:column;gap:16px;position:sticky;top:80px">
+      <!-- Sidebar : Publication+Paramètres sticky, Rattachements en flux normal -->
+      <div style="display:flex;flex-direction:column;gap:16px">
 
-        <!-- Publication -->
-        <div class="card">
-          <div class="card-header"><h3 class="card-title">Publication</h3></div>
-          <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
-            <button type="submit" class="btn btn-primary w-full" style="justify-content:center">
-              <i class="fas fa-save"></i> <?= $isEdit ? 'Enregistrer' : 'Importer' ?>
-            </button>
-            <?php if ($isEdit): ?>
-            <a href="<?= url('student/case_studies/view.php?id='.$cs['id']) ?>" target="_blank"
-              class="btn btn-secondary w-full" style="justify-content:center">
-              <i class="fas fa-eye"></i> Prévisualiser
-            </a>
-            <?php endif; ?>
-            <a href="<?= url('teacher/case_studies/index.php') ?>" class="btn btn-ghost w-full" style="justify-content:center">
-              Annuler
-            </a>
+        <!-- Publication + Paramètres — sticky, tient dans le viewport -->
+        <div style="position:sticky;top:80px">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Publication</h3></div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+              <button type="submit" class="btn btn-primary w-full" style="justify-content:center">
+                <i class="fas fa-save"></i> <?= $isEdit ? 'Enregistrer' : 'Importer' ?>
+              </button>
+              <?php if ($isEdit): ?>
+              <a href="<?= url('student/case_studies/view.php?id='.$cs['id']) ?>" target="_blank"
+                class="btn btn-secondary w-full" style="justify-content:center">
+                <i class="fas fa-eye"></i> Prévisualiser
+              </a>
+              <?php endif; ?>
+              <a href="<?= url('teacher/case_studies/index.php') ?>" class="btn btn-ghost w-full" style="justify-content:center">
+                Annuler
+              </a>
+              <div style="border-top:1px solid var(--border);margin:4px -24px"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div>
+                  <label class="form-label" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Durée</label>
+                  <div style="display:flex;align-items:center;gap:4px">
+                    <input type="number" name="duration_minutes" class="form-control" style="font-size:12px;min-width:0;flex:1"
+                      min="0" max="9999" placeholder="—" value="<?= $cs['duration_minutes'] !== null ? (int)$cs['duration_minutes'] : '' ?>">
+                    <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">min</span>
+                  </div>
+                </div>
+                <div>
+                  <label class="form-label" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">XP</label>
+                  <div style="display:flex;align-items:center;gap:4px">
+                    <input type="number" name="xp_reward" class="form-control" style="font-size:12px;min-width:0;flex:1"
+                      min="0" max="9999" value="<?= (int)$cs['xp_reward'] ?>">
+                    <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">XP</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Durée / XP -->
-        <div class="card">
-          <div class="card-header"><h3 class="card-title">Paramètres</h3></div>
-          <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
-            <div>
-              <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Durée de réalisation</label>
-              <div style="display:flex;align-items:center;gap:6px">
-                <input type="number" name="duration_minutes" class="form-control" style="font-size:13px;width:80px"
-                  min="0" max="9999" placeholder="—" value="<?= $cs['duration_minutes'] !== null ? (int)$cs['duration_minutes'] : '' ?>">
-                <span style="font-size:12px;color:var(--text-muted);white-space:nowrap">minutes</span>
-              </div>
-            </div>
-            <div style="margin-bottom:0">
-              <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">XP attribués</label>
-              <div style="display:flex;align-items:center;gap:6px">
-                <input type="number" name="xp_reward" class="form-control" style="font-size:13px;width:80px"
-                  min="0" max="9999" value="<?= (int)$cs['xp_reward'] ?>">
-                <span style="font-size:12px;color:var(--text-muted);white-space:nowrap">XP</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Rattachements pédagogiques -->
+        <!-- Rattachements — flux normal, accessible par scroll du viewport -->
         <div class="card">
           <div class="card-header"><h3 class="card-title"><i class="fas fa-sitemap" style="margin-right:7px;color:var(--primary-light)"></i>Rattachements</h3></div>
           <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
-
             <div>
               <label class="form-label" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Formation</label>
               <select name="formation_id" id="sel-formation" class="form-control" style="font-size:12px" onchange="onFormationChange(this.value)">
@@ -618,16 +620,11 @@ renderTopbar($pageTitle, [
                 <?php endforeach; ?>
               </select>
             </div>
-
-
             <?php renderCascadeSelect('module_id','module',$initModules,$cs['module_id'],'Module de formation','← sélectionner une formation d\'abord'); ?>
             <?php renderCascadeSelect('lesson_id','lesson',$initLessons,$cs['lesson_id'],'Capsule de cours','← sélectionner un module d\'abord'); ?>
-
             <div style="border-top:1px solid var(--border);margin:2px -16px"></div>
-
             <?php renderCascadeSelect('activity_type_id','at',$initActivityTypes,$cs['activity_type_id'],'Bloc / Activité type','← sélectionner une formation d\'abord',function($i){ return $i['code'] . ' — ' . mb_substr($i['title'],0,30); }); ?>
             <?php renderCascadeSelect('competency_id','competency',$initCompetencies,$cs['competency_id'],'Compétence','← sélectionner un bloc d\'abord',function($i){ return $i['code'] . ' — ' . mb_substr($i['title'],0,30); }); ?>
-
           </div>
         </div>
 

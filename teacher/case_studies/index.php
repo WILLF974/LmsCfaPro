@@ -174,7 +174,7 @@ renderTopbar('Études de cas', [['Enseignant', url('teacher/index.php')], ['Étu
         <a href="<?= url('student/case_studies/view.php?id='.$cs['id']) ?>" target="_blank" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center">
           <i class="fas fa-eye"></i> Visualiser
         </a>
-        <a href="<?= url('teacher/case_studies/create.php?id='.$cs['id']) ?>" class="btn btn-ghost btn-sm" title="Modifier">
+        <a href="<?= url('teacher/case_studies/edit.php?id='.$cs['id']) ?>" class="btn btn-ghost btn-sm" title="Modifier">
           <i class="fas fa-edit"></i>
         </a>
         <?php $canDelete = isAdmin() || isPedagogy() || $cs['created_by'] == $userId; ?>
