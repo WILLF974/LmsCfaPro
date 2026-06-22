@@ -23,8 +23,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$siteName = getSetting('site_name', 'LMS CFA Pro');
-$tagline  = getSetting('site_tagline', 'La plateforme de formation professionnelle');
+$siteName      = getSetting('site_name', 'LMS CFA Pro');
+$homepageMode  = getSetting('homepage_mode', 'default');
+
+// Données dynamiques pour la page marketing
+$mktData = [];
+if ($homepageMode === 'marketing') {
+    $pdo = getDB();
+    $mktData = [
+        'headline'      => getSetting('marketing_headline', 'Formez-vous aux métiers de demain'),
+        'description'   => getSetting('marketing_description', 'Rejoignez notre centre de formation et obtenez un titre professionnel reconnu par l\'État.'),
+        'badge_text'    => getSetting('marketing_badge_text', 'Centre de Formation Agréé · Certification Qualiopi'),
+        'cta_label'     => getSetting('marketing_cta_label', 'Découvrir nos formations'),
+        'contact_email' => getSetting('contact_email', ''),
+        'contact_phone' => getSetting('contact_phone', ''),
+        'address'       => getSetting('address', ''),
+        'nb_students'   => (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='student' AND status='active'")->fetchColumn(),
+        'nb_formations' => (int)$pdo->query("SELECT COUNT(*) FROM formations WHERE status='active'")->fetchColumn(),
+        'nb_rncp'       => (int)$pdo->query("SELECT COUNT(*) FROM rncp_titles")->fetchColumn(),
+        'rncp_titles'   => $pdo->query("SELECT rncp_code, title FROM rncp_titles ORDER BY created_at DESC LIMIT 5")->fetchAll(),
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -59,8 +78,9 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
   padding: 40px;
 }
 
-.hero-content { position: relative; z-index: 1; }
+.hero-content { position: relative; z-index: 1; max-width: 560px; }
 
+/* ── Mode par défaut ── */
 .features-list { list-style: none; margin-top: 40px; display: flex; flex-direction: column; gap: 16px; }
 .feature-item { display: flex; align-items: flex-start; gap: 16px; }
 .feature-icon {
@@ -71,21 +91,44 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
 }
 .feature-text h4 { font-size: 15px; font-weight: 700; color: white; margin-bottom: 3px; }
 .feature-text p  { font-size: 13px; color: var(--text-muted); }
-
-.qualiopi-banner {
-  display: inline-flex; align-items: center; gap: 8px;
-  background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3);
-  padding: 8px 16px; border-radius: var(--radius-full);
-  font-size: 12px; font-weight: 600; color: #34d399;
-  margin-bottom: 20px;
-}
-
 .stats-row { display: flex; gap: 32px; margin-top: 48px; }
 .stat-mini { text-align: center; }
 .stat-mini .num { font-size: 28px; font-weight: 800; font-family: var(--font-heading); background: linear-gradient(135deg,#6366f1,#a5b4fc); -webkit-background-clip:text;-webkit-text-fill-color:transparent; }
 .stat-mini .lbl { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
-/* Login form */
+/* ── Mode marketing ── */
+.mkt-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3);
+  padding: 8px 16px; border-radius: var(--radius-full);
+  font-size: 12px; font-weight: 600; color: #34d399; margin-bottom: 22px;
+}
+.mkt-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin: 32px 0; }
+.mkt-stat {
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--radius-lg); padding: 16px; text-align: center;
+}
+.mkt-stat .num { font-size: 32px; font-weight: 800; font-family: var(--font-heading); background: linear-gradient(135deg,#6366f1,#a5b4fc); -webkit-background-clip:text;-webkit-text-fill-color:transparent; line-height:1; }
+.mkt-stat .lbl { font-size: 11px; color: var(--text-muted); margin-top: 5px; text-transform: uppercase; letter-spacing:.06em; }
+.mkt-rncp { margin-bottom: 28px; }
+.mkt-rncp-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; margin-bottom: 6px;
+  background: rgba(99,102,241,.08); border: 1px solid rgba(99,102,241,.18);
+  border-radius: var(--radius); font-size: 13px;
+}
+.mkt-rncp-code { font-size: 10px; font-weight: 700; color: var(--primary-light); background: rgba(99,102,241,.2); padding: 2px 7px; border-radius: 20px; flex-shrink:0; }
+.mkt-contact { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-muted); margin-top: 24px; }
+.mkt-contact span { display:flex; align-items:center; gap: 8px; }
+.mkt-contact i { color: var(--primary-light); width:14px; text-align:center; }
+
+/* ── Login form ── */
+.qualiopi-banner {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3);
+  padding: 8px 16px; border-radius: var(--radius-full);
+  font-size: 12px; font-weight: 600; color: #34d399; margin-bottom: 20px;
+}
 .login-form-wrap { width: 100%; max-width: 380px; }
 .login-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
 .login-logo .logo-mark {
@@ -97,10 +140,8 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
 }
 .login-logo .logo-text { font-family: var(--font-heading); font-size: 20px; font-weight: 800; }
 .login-logo .logo-text span { display: block; font-size: 12px; font-weight: 400; color: var(--text-muted); }
-
 .login-title { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
 .login-sub { color: var(--text-muted); font-size: 14px; margin-bottom: 32px; }
-
 .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--text-faint); font-size: 12px; }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
@@ -112,9 +153,71 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
 </head>
 <body>
 <div class="landing-page">
-  <!-- LEFT: Hero -->
+
+  <!-- ══ LEFT ══════════════════════════════════════════════════ -->
   <div class="landing-left">
     <div class="hero-content fade-in">
+
+      <?php if ($homepageMode === 'marketing'): ?>
+      <!-- ── Page vitrine du centre de formation ── -->
+      <div class="mkt-badge">
+        <i class="fas fa-shield-alt"></i> <?= e($mktData['badge_text']) ?>
+      </div>
+
+      <h1 style="font-size:clamp(28px,3.5vw,46px);font-family:var(--font-heading);font-weight:800;line-height:1.2;margin-bottom:16px">
+        <?= nl2br(e($mktData['headline'])) ?>
+      </h1>
+      <p style="font-size:16px;color:var(--text-muted);line-height:1.7;margin-bottom:0;max-width:480px">
+        <?= e($mktData['description']) ?>
+      </p>
+
+      <!-- Statistiques dynamiques -->
+      <div class="mkt-stats">
+        <div class="mkt-stat">
+          <div class="num"><?= $mktData['nb_students'] > 0 ? $mktData['nb_students'] : '—' ?></div>
+          <div class="lbl">Apprenants actifs</div>
+        </div>
+        <div class="mkt-stat">
+          <div class="num"><?= $mktData['nb_formations'] > 0 ? $mktData['nb_formations'] : '—' ?></div>
+          <div class="lbl">Formations actives</div>
+        </div>
+        <div class="mkt-stat">
+          <div class="num"><?= $mktData['nb_rncp'] > 0 ? $mktData['nb_rncp'] : '—' ?></div>
+          <div class="lbl">Titres RNCP</div>
+        </div>
+      </div>
+
+      <!-- Titres RNCP disponibles -->
+      <?php if (!empty($mktData['rncp_titles'])): ?>
+      <div class="mkt-rncp">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">
+          <i class="fas fa-certificate" style="color:var(--primary-light);margin-right:5px"></i>Certifications proposées
+        </div>
+        <?php foreach ($mktData['rncp_titles'] as $t): ?>
+        <div class="mkt-rncp-item">
+          <span class="mkt-rncp-code"><?= e($t['rncp_code']) ?></span>
+          <span style="color:rgba(255,255,255,.85)"><?= e($t['title']) ?></span>
+        </div>
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
+
+      <!-- CTA -->
+      <a href="<?= url('register.php') ?>" class="btn btn-primary" style="font-size:15px;padding:12px 24px">
+        <i class="fas fa-user-plus"></i> <?= e($mktData['cta_label']) ?>
+      </a>
+
+      <!-- Contacts -->
+      <?php if ($mktData['contact_email'] || $mktData['contact_phone'] || $mktData['address']): ?>
+      <div class="mkt-contact">
+        <?php if ($mktData['contact_phone']): ?><span><i class="fas fa-phone"></i><?= e($mktData['contact_phone']) ?></span><?php endif; ?>
+        <?php if ($mktData['contact_email']): ?><span><i class="fas fa-envelope"></i><?= e($mktData['contact_email']) ?></span><?php endif; ?>
+        <?php if ($mktData['address']): ?><span><i class="fas fa-map-marker-alt"></i><?= e(str_replace("\n", ' — ', $mktData['address'])) ?></span><?php endif; ?>
+      </div>
+      <?php endif; ?>
+
+      <?php else: ?>
+      <!-- ── Page d'accueil par défaut ── -->
       <div class="qualiopi-banner">
         <i class="fas fa-shield-alt"></i> Certification Qualiopi · RNCP
       </div>
@@ -132,31 +235,19 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
       <ul class="features-list">
         <li class="feature-item">
           <div class="feature-icon"><i class="fas fa-certificate"></i></div>
-          <div class="feature-text">
-            <h4>Titres RNCP intégrés</h4>
-            <p>Importez et structurez vos titres par activités types et compétences</p>
-          </div>
+          <div class="feature-text"><h4>Titres RNCP intégrés</h4><p>Importez et structurez vos titres par activités types et compétences</p></div>
         </li>
         <li class="feature-item">
           <div class="feature-icon"><i class="fas fa-trophy"></i></div>
-          <div class="feature-text">
-            <h4>Gamification & Badges</h4>
-            <p>Motivez vos apprenants avec XP, niveaux et badges personnalisés</p>
-          </div>
+          <div class="feature-text"><h4>Gamification & Badges</h4><p>Motivez vos apprenants avec XP, niveaux et badges personnalisés</p></div>
         </li>
         <li class="feature-item">
           <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
-          <div class="feature-text">
-            <h4>Conformité Qualiopi</h4>
-            <p>Indicateurs de qualité, suivi des absences, évaluations traçables</p>
-          </div>
+          <div class="feature-text"><h4>Conformité Qualiopi</h4><p>Indicateurs de qualité, suivi des absences, évaluations traçables</p></div>
         </li>
         <li class="feature-item">
           <div class="feature-icon"><i class="fas fa-play-circle"></i></div>
-          <div class="feature-text">
-            <h4>Multi-formats</h4>
-            <p>Vidéos, PDF, quiz, exercices, SCORM — tout en un</p>
-          </div>
+          <div class="feature-text"><h4>Multi-formats</h4><p>Vidéos, PDF, quiz, exercices, SCORM — tout en un</p></div>
         </li>
       </ul>
 
@@ -165,10 +256,12 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
         <div class="stat-mini"><div class="num">RNCP</div><div class="lbl">Titres pro</div></div>
         <div class="stat-mini"><div class="num">∞</div><div class="lbl">Capsules</div></div>
       </div>
+      <?php endif; ?>
+
     </div>
   </div>
 
-  <!-- RIGHT: Login Form -->
+  <!-- ══ RIGHT : Formulaire de connexion (identique quel que soit le mode) ══ -->
   <div class="landing-right">
     <div class="login-form-wrap fade-in">
       <div class="login-logo">
@@ -185,7 +278,6 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
 
       <form method="POST" action="">
         <?= csrfField() ?>
-
         <div class="form-group">
           <label class="form-label">Adresse email</label>
           <div class="input-group">
@@ -194,7 +286,6 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
                    value="<?= e($formData['email'] ?? '') ?>" required autocomplete="email">
           </div>
         </div>
-
         <div class="form-group">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <label class="form-label" style="margin:0">Mot de passe</label>
@@ -208,7 +299,6 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
             </button>
           </div>
         </div>
-
         <button type="submit" class="btn btn-primary w-full btn-lg" style="margin-top:4px">
           <i class="fas fa-sign-in-alt"></i> Se connecter
         </button>
@@ -220,18 +310,7 @@ $tagline  = getSetting('site_tagline', 'La plateforme de formation professionnel
         <i class="fas fa-user-plus"></i> Créer un compte étudiant
       </a>
 
-      <!-- Demo accounts hint -->
-      <div style="margin-top:28px;padding:16px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:var(--radius);font-size:12px;color:var(--text-muted)">
-        <div style="font-weight:700;color:var(--primary-light);margin-bottom:8px"><i class="fas fa-info-circle"></i> Comptes de démonstration</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
-          <div>👑 <strong>Admin :</strong></div><div>admin@lmscfapro.fr</div>
-          <div>📚 <strong>Enseignant :</strong></div><div>teacher@lmscfapro.fr</div>
-          <div>🎓 <strong>Étudiant :</strong></div><div>student@lmscfapro.fr</div>
-          <div style="grid-column:1/-1;margin-top:4px">🔑 <strong>Mot de passe :</strong> password</div>
-        </div>
-      </div>
-
-      <p style="text-align:center;font-size:12px;color:var(--text-faint);margin-top:24px">
+      <p style="text-align:center;font-size:12px;color:var(--text-faint);margin-top:28px">
         © <?= date('Y') ?> <?= e($siteName) ?> · Tous droits réservés
       </p>
     </div>
