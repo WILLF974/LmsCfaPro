@@ -102,8 +102,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
     $passed       = $scorePercent >= $quiz['passing_score'] ? 1 : 0;
     $timeSpent    = (int)($_POST['time_spent'] ?? 0);
 
-    $pdo->prepare('UPDATE quiz_attempts SET status="completed", completed_at=NOW(), raw_score=?, max_score=?, score=?, passed=?, time_spent_seconds=? WHERE id=?')
-        ->execute([$rawScore, $maxScore, $scorePercent, $passed, $timeSpent, $attemptId]);
+    $pdo->prepare('UPDATE quiz_attempts SET status="completed", completed_at=NOW(), raw_score=?, max_score=?, score=?, passed=?, time_spent_seconds=?, formation_id=? WHERE id=?')
+        ->execute([$rawScore, $maxScore, $scorePercent, $passed, $timeSpent, $formationId ?: null, $attemptId]);
 
     // XP si réussi pour la première fois
     if ($passed && !$bestAttempt) {
@@ -111,6 +111,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
     }
 
     auditLog('quiz_submitted', 'quiz_attempt', $attemptId);
+    redirect(url("student/quiz/take.php?id=$quizId&formation_id=$formationId&result=$attemptId"));
+}
+
+// ── ACTION : Soumettre pour correction enseignant ──────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_for_review') {
+    requireCsrf();
+    $attemptId = (int)($_POST['attempt_id'] ?? 0);
+    $checkStmt = $pdo->prepare('SELECT id FROM quiz_attempts WHERE id=? AND user_id=? AND quiz_id=? AND status="completed"');
+    $checkStmt->execute([$attemptId, $userId, $quizId]);
+    if ($checkStmt->fetch()) {
+        $pdo->prepare('UPDATE quiz_attempts SET submitted_for_review=1, review_status="pending", formation_id=COALESCE(formation_id,?) WHERE id=?')
+            ->execute([$formationId ?: null, $attemptId]);
+        setFlash('success', 'Votre quiz a été soumis à votre enseignant pour correction.');
+    }
     redirect(url("student/quiz/take.php?id=$quizId&formation_id=$formationId&result=$attemptId"));
 }
 
@@ -160,6 +174,14 @@ if ($resultId) {
         $ans['options'] = $optsStmt->fetchAll();
         $ans['selected_ids'] = $ans['selected_option_ids'] ? array_map('intval', explode(',', $ans['selected_option_ids'])) : [];
         $answersWithOptions[] = $ans;
+    }
+
+    // Vérifier si des questions ouvertes existent
+    $hasOpenQuestions = false;
+    foreach ($answersWithOptions as $ans) {
+        if ($ans['question_type'] === 'short_answer' || $ans['question_type'] === 'long_answer') {
+            $hasOpenQuestions = true; break;
+        }
     }
 
     renderHead('Résultats — ' . $quiz['title']);
@@ -230,6 +252,42 @@ if ($resultId) {
             </form>
             <?php endif; ?>
           </div>
+
+          <!-- Soumission pour correction enseignant -->
+          <?php if ($resultAttempt['review_status'] === 'graded'): ?>
+          <div style="margin-top:24px;padding:16px 24px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:var(--radius);text-align:left">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <i class="fas fa-check-circle" style="color:var(--success);font-size:18px"></i>
+              <strong style="color:var(--success)">Corrigé par votre enseignant</strong>
+              <?php if ($resultAttempt['teacher_score'] !== null): ?>
+              <span class="badge badge-success" style="font-size:14px;padding:4px 12px"><?= $resultAttempt['teacher_score'] ?>/<?= round($quiz['max_attempts'] > 0 ? 20 : 20) ?></span>
+              <?php endif; ?>
+            </div>
+            <?php if ($resultAttempt['teacher_feedback']): ?>
+            <p style="color:var(--text-muted);font-size:13px;margin:0;font-style:italic">"<?= e($resultAttempt['teacher_feedback']) ?>"</p>
+            <?php endif; ?>
+          </div>
+          <?php elseif ($resultAttempt['review_status'] === 'pending'): ?>
+          <div style="margin-top:24px;padding:14px 20px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:var(--radius);display:flex;align-items:center;gap:10px">
+            <i class="fas fa-clock" style="color:var(--warning)"></i>
+            <span style="color:var(--text-muted);font-size:13px">Quiz soumis à votre enseignant — correction en attente.</span>
+          </div>
+          <?php else: ?>
+          <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:20px">
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+              <?= $hasOpenQuestions ? '<i class="fas fa-pencil-alt" style="color:var(--warning)"></i> Ce quiz contient des réponses ouvertes qui nécessitent une correction manuelle.' : '<i class="fas fa-paper-plane" style="color:var(--primary-light)"></i> Soumettez votre quiz à votre enseignant pour recevoir une correction personnalisée.' ?>
+            </p>
+            <form method="POST">
+              <?= csrfField() ?>
+              <input type="hidden" name="action" value="submit_for_review">
+              <input type="hidden" name="attempt_id" value="<?= $resultAttempt['id'] ?>">
+              <button type="submit" class="btn btn-primary"
+                onclick="return confirm('Soumettre ce quiz à votre enseignant pour correction ?')">
+                <i class="fas fa-paper-plane"></i> Soumettre pour correction
+              </button>
+            </form>
+          </div>
+          <?php endif; ?>
         </div>
       </div>
 

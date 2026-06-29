@@ -34,3 +34,11 @@ admin/rncp/diag2.php
 *.log
 /tmp/
 /cache/
+
+# ══ Tests & outils de build ══════════════════════════════════════
+vendor/
+composer.phar
+.phpunit.result.cache
+
+# ══ Claude Code ══════════════════════════════════════════════════
+.claude/
