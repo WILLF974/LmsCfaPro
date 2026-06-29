@@ -77,6 +77,35 @@ foreach ($quizzesStmt->fetchAll() as $q) {
     else $standaloneQuizzes[] = $q;
 }
 
+// Études de cas rattachées à la formation ou aux modules, avec statut de soumission
+$standaloneCaseStudies = [];
+try {
+    $csStmt = $pdo->prepare("
+        SELECT cs.*,
+               at.code AS at_code, at.title AS at_title,
+               co.code AS co_code, co.title AS co_title,
+               m.title AS module_title,
+               css.id           AS sub_id,
+               css.status       AS sub_status,
+               css.score        AS sub_score,
+               css.max_score    AS sub_max_score,
+               css.grade        AS sub_grade,
+               css.submitted_at AS sub_submitted_at
+        FROM case_studies cs
+        LEFT JOIN activity_types at ON cs.activity_type_id = at.id
+        LEFT JOIN competencies   co ON cs.competency_id    = co.id
+        LEFT JOIN modules        m  ON cs.module_id        = m.id
+        LEFT JOIN case_study_submissions css
+               ON css.case_study_id = cs.id AND css.user_id = ?
+        WHERE (cs.formation_id = ?
+           OR  cs.module_id IN (SELECT id FROM modules WHERE formation_id = ?))
+          AND cs.lesson_id IS NULL
+        ORDER BY cs.module_id, cs.id
+    ");
+    $csStmt->execute([$userId, $formationId, $formationId]);
+    $standaloneCaseStudies = $csStmt->fetchAll();
+} catch (PDOException $e) {}
+
 // Statistiques globales
 $totalLessons = 0; $doneLessons = 0; $inProgressLessons = 0;
 $totalXpEarned = 0; $totalXpPossible = 0;
@@ -194,9 +223,9 @@ renderTopbar($enrollment['title'], [['Mes formations', url('student/formations/i
   <!-- Parcours détaillé par module -->
   <div style="display:flex;flex-direction:column;gap:20px">
     <?php foreach ($modules as $i => $mod):
-      $modLessons  = $lessonsByModule[$mod['id']] ?? [];
-      $modQuizzes  = $quizzesByModule[$mod['id']] ?? [];
-      $modTotal    = count($modLessons);
+      $modLessons      = $lessonsByModule[$mod['id']]      ?? [];
+      $modQuizzes      = $quizzesByModule[$mod['id']]      ?? [];
+      $modTotal        = count($modLessons);
       $modDone     = count(array_filter($modLessons, fn($l) => $l['progress_status'] === 'completed'));
       $modPct      = $modTotal > 0 ? round(($modDone/$modTotal)*100) : 0;
       $modComplete = $modPct === 100;
@@ -379,6 +408,60 @@ renderTopbar($enrollment['title'], [['Mes formations', url('student/formations/i
       </div>
     </div>
     <?php endif; ?>
+
+    <!-- Études de cas de la formation (toutes, avec badge module si applicable) -->
+    <?php
+    $csTypeIcons = [
+        'pdf'          => ['icon'=>'file-pdf',        'color'=>'#ef4444','label'=>'PDF'],
+        'document'     => ['icon'=>'file-word',       'color'=>'#3b82f6','label'=>'Document'],
+        'presentation' => ['icon'=>'file-powerpoint', 'color'=>'#f97316','label'=>'Présentation'],
+        'video'        => ['icon'=>'play-circle',     'color'=>'#ef4444','label'=>'Vidéo'],
+        'link'         => ['icon'=>'link',            'color'=>'#0ea5e9','label'=>'Lien'],
+    ];
+    ?>
+    <?php if (!empty($standaloneCaseStudies)): ?>
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-folder-open" style="color:var(--primary-light)"></i> Études de cas</h3>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+        <?php foreach ($standaloneCaseStudies as $cs):
+          $csTi    = $csTypeIcons[$cs['file_type']] ?? $csTypeIcons['document'];
+          $subSt   = $cs['sub_status'] ?? null;
+          $hasGrade  = $subSt === 'graded';
+          $isPending = in_array($subSt, ['submitted','under_review']);
+          $notSubmit = !$subSt;
+        ?>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px;border-radius:var(--radius);
+          background:<?= $hasGrade ? 'rgba(16,185,129,.08)' : ($isPending ? 'rgba(245,158,11,.06)' : 'var(--bg-elevated)') ?>;
+          border:1px solid <?= $hasGrade ? 'rgba(16,185,129,.25)' : ($isPending ? 'rgba(245,158,11,.2)' : 'var(--border)') ?>">
+          <div style="width:44px;height:44px;border-radius:var(--radius);display:flex;align-items:center;justify-content:center;font-size:22px;background:<?= $csTi['color'] ?>18;flex-shrink:0">
+            <i class="fas fa-<?= $csTi['icon'] ?>" style="color:<?= $csTi['color'] ?>"></i>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:700;margin-bottom:3px"><?= e($cs['title']) ?></div>
+            <div style="font-size:12px;color:var(--text-muted);display:flex;gap:12px;flex-wrap:wrap">
+              <span><?= $csTi['label'] ?></span>
+              <?php if (!empty($cs['module_title'])): ?><span><i class="fas fa-cubes" style="color:#818cf8"></i> <?= e($cs['module_title']) ?></span><?php endif; ?>
+              <?php if ($cs['at_code']): ?><span><i class="fas fa-layer-group" style="color:#f59e0b"></i> <?= e($cs['at_code']) ?></span><?php endif; ?>
+              <?php if ($hasGrade): ?>
+                <span style="color:var(--success)"><i class="fas fa-check-circle"></i> Corrigé<?php if ($cs['sub_score'] !== null): ?> · <?= $cs['sub_score'] ?>/<?= $cs['sub_max_score'] ?><?php endif; ?><?php if ($cs['sub_grade']): ?> · <?= e($cs['sub_grade']) ?><?php endif; ?></span>
+              <?php elseif ($isPending): ?>
+                <span style="color:var(--warning)"><i class="fas fa-clock"></i> En attente de correction</span>
+              <?php endif; ?>
+            </div>
+          </div>
+          <a href="<?= url('student/case_studies/view.php?id='.$cs['id']) ?>"
+             class="btn <?= $notSubmit ? 'btn-primary' : ($hasGrade ? 'btn-ghost' : 'btn-secondary') ?>">
+            <i class="fas fa-<?= $hasGrade ? 'eye' : 'arrow-right' ?>"></i>
+            <?= $hasGrade ? 'Voir correction' : ($isPending ? 'Voir / Soumettre' : 'Ouvrir l\'étude de cas') ?>
+          </a>
+        </div>
+        <?php endforeach; ?>
+      </div>
+    </div>
+    <?php endif; ?>
+
   </div>
 </div>
 

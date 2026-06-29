@@ -14,9 +14,10 @@ $stmt->execute([$id]);
 $cs = $stmt->fetch();
 if (!$cs) { setFlash('error', 'Étude de cas introuvable.'); redirect(url('student/index.php')); }
 
+$userId = (int)$_SESSION['user_id'];
+
 // Accès : enseignant/admin toujours autorisé ; étudiant vérifié si lié à une formation
 if (!isTeacher() && !isAdmin() && !isPedagogy()) {
-    $userId = (int)$_SESSION['user_id'];
     if ($cs['formation_id']) {
         $enrolled = $pdo->prepare('SELECT 1 FROM enrollments WHERE user_id=? AND formation_id=? AND status="active"');
         $enrolled->execute([$userId, $cs['formation_id']]);
@@ -24,6 +25,77 @@ if (!isTeacher() && !isAdmin() && !isPedagogy()) {
             setFlash('error', 'Accès non autorisé.'); redirect(url('student/index.php'));
         }
     }
+}
+
+// Récupérer la formation active de l'étudiant pour cette étude de cas
+$enrolledFormationId = 0;
+if ($cs['formation_id']) {
+    $efStmt = $pdo->prepare('SELECT formation_id FROM enrollments WHERE user_id=? AND formation_id=? AND status="active" LIMIT 1');
+    $efStmt->execute([$userId, $cs['formation_id']]);
+    $efRow = $efStmt->fetch();
+    $enrolledFormationId = $efRow ? (int)$efRow['formation_id'] : (int)$cs['formation_id'];
+} else {
+    // Prendre la première formation active de l'étudiant
+    $efStmt = $pdo->prepare('SELECT formation_id FROM enrollments WHERE user_id=? AND status="active" ORDER BY id DESC LIMIT 1');
+    $efStmt->execute([$userId]);
+    $efRow = $efStmt->fetch();
+    $enrolledFormationId = $efRow ? (int)$efRow['formation_id'] : 0;
+}
+
+// Soumission existante de cet étudiant
+$existingSubmission = null;
+try {
+    $subStmt = $pdo->prepare('SELECT * FROM case_study_submissions WHERE case_study_id=? AND user_id=? LIMIT 1');
+    $subStmt->execute([$id, $userId]);
+    $existingSubmission = $subStmt->fetch() ?: null;
+} catch (PDOException $e) {}
+
+// ── ACTION : Soumettre le travail ──────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_case_study') {
+    requireCsrf();
+
+    if (isTeacher() || isAdmin()) {
+        setFlash('error', 'Les enseignants ne soumettent pas de travaux.');
+        redirect(url("student/case_studies/view.php?id=$id"));
+    }
+
+    $textResponse    = trim($_POST['text_response'] ?? '');
+    $submittedFormId = (int)($_POST['formation_id'] ?? $enrolledFormationId);
+    $uploadedPath    = null;
+
+    if (!empty($_FILES['submission_file']['name'])) {
+        $uploadResult = uploadFile($_FILES['submission_file'], 'submissions');
+        if (!$uploadResult['success']) {
+            setFlash('error', 'Erreur lors de l\'upload : ' . ($uploadResult['error'] ?? 'Erreur inconnue'));
+            redirect(url("student/case_studies/view.php?id=$id"));
+        }
+        $uploadedPath = json_encode(['path' => $uploadResult['path'], 'name' => $_FILES['submission_file']['name']]);
+    }
+
+    if (!$textResponse && !$uploadedPath) {
+        setFlash('error', 'Veuillez saisir une réponse ou joindre un fichier.');
+        redirect(url("student/case_studies/view.php?id=$id"));
+    }
+
+    if ($existingSubmission) {
+        if (in_array($existingSubmission['status'], ['graded', 'returned'])) {
+            setFlash('error', 'Ce travail a été évalué, il ne peut plus être modifié ni soumis à nouveau.');
+            redirect(url("student/case_studies/view.php?id=$id"));
+        } elseif (in_array($existingSubmission['status'], ['submitted', 'under_review'])) {
+            setFlash('info', 'Votre travail est déjà en cours de correction.');
+            redirect(url("student/case_studies/view.php?id=$id"));
+        } else {
+            setFlash('error', 'Action non autorisée.');
+            redirect(url("student/case_studies/view.php?id=$id"));
+        }
+    } else {
+        $pdo->prepare('INSERT INTO case_study_submissions (case_study_id, user_id, formation_id, text_response, file_path) VALUES (?,?,?,?,?)')
+            ->execute([$id, $userId, $submittedFormId ?: null, $textResponse ?: null, $uploadedPath]);
+        setFlash('success', 'Votre travail a bien été soumis à votre enseignant.');
+    }
+
+    auditLog('case_study_submitted', 'case_study_submissions', (int)$pdo->lastInsertId());
+    redirect(url("student/case_studies/view.php?id=$id"));
 }
 
 // Ressources complémentaires
@@ -86,7 +158,7 @@ renderTopbar(e($cs['title']), [
             <?php if ($isMultiPdf): ?>
             <span class="badge badge-primary"><i class="fas fa-copy"></i> <?= count($pdfPages) ?> PDF</span>
             <?php endif; ?>
-            <span style="font-size:11px;color:var(--text-faint);align-self:center"><?= formatDate($cs['created_at'], 'd/m/Y', false) ?></span>
+            <span style="font-size:11px;color:var(--text-faint);align-self:center"><?= formatDate($cs['created_at'], 'd/m/Y') ?></span>
           </div>
         </div>
       </div>
@@ -217,6 +289,183 @@ renderTopbar(e($cs['title']), [
     <div class="empty-state"><p>Aucun fichier disponible.</p></div>
     <?php endif; ?>
 
+  <?php endif; ?>
+
+  <!-- ── Bloc de soumission étudiant ── -->
+  <?php if (!isTeacher() && !isAdmin() && !isPedagogy()):
+    $subStatus = $existingSubmission['status'] ?? null;
+    $isGraded  = $subStatus === 'graded';
+  ?>
+  <?php
+    $cardBorder = $isGraded ? 'rgba(16,185,129,.4)'
+        : ($subStatus === 'returned'  ? 'rgba(239,68,68,.35)'
+        : ($existingSubmission        ? 'rgba(245,158,11,.3)'
+        :                               'rgba(99,102,241,.25)'));
+  ?>
+  <div class="card" style="margin-top:24px;border:2px solid <?= $cardBorder ?>">
+    <div class="card-header" style="border-bottom:1px solid var(--border)">
+      <h3 class="card-title" style="display:flex;align-items:center;gap:10px">
+        <?php if ($isGraded): ?>
+          <i class="fas fa-check-circle" style="color:var(--success)"></i> Résultat de la correction
+        <?php elseif ($subStatus === 'returned'): ?>
+          <i class="fas fa-undo" style="color:var(--danger)"></i> Travail retourné
+        <?php elseif ($subStatus === 'submitted' || $subStatus === 'under_review'): ?>
+          <i class="fas fa-clock" style="color:var(--warning)"></i> Travail soumis
+        <?php else: ?>
+          <i class="fas fa-paper-plane" style="color:var(--primary-light)"></i> Soumettre mon travail
+        <?php endif; ?>
+      </h3>
+    </div>
+    <div class="card-body">
+
+      <?php if ($isGraded): ?>
+      <!-- ── Travail corrigé et verrouillé ── -->
+      <div style="display:flex;align-items:flex-start;gap:16px;padding:16px;background:rgba(16,185,129,.07);border-radius:var(--radius);margin-bottom:16px">
+        <i class="fas fa-check-circle" style="color:var(--success);font-size:28px;flex-shrink:0;margin-top:2px"></i>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+            <strong style="color:var(--success);font-size:16px">Travail corrigé</strong>
+            <?php if ($existingSubmission['score'] !== null): ?>
+            <span class="badge badge-success" style="font-size:15px;padding:4px 14px">
+              <?= $existingSubmission['score'] ?> / <?= $existingSubmission['max_score'] ?>
+            </span>
+            <?php endif; ?>
+            <?php if ($existingSubmission['grade']): ?>
+            <span class="badge badge-primary" style="font-size:13px"><?= e($existingSubmission['grade']) ?></span>
+            <?php endif; ?>
+            <?php if ($existingSubmission['score'] === null && !$existingSubmission['grade']): ?>
+            <span style="font-size:13px;color:var(--text-muted)">Aucune note chiffrée</span>
+            <?php endif; ?>
+          </div>
+          <?php if ($existingSubmission['feedback']): ?>
+          <div style="margin-top:8px;padding:10px 14px;background:rgba(255,255,255,.04);border-radius:var(--radius);border-left:3px solid var(--success)">
+            <div style="font-size:11px;font-weight:700;color:var(--success);margin-bottom:4px;text-transform:uppercase">Commentaire de l'enseignant</div>
+            <p style="color:var(--text);font-size:13px;font-style:italic;margin:0"><?= e($existingSubmission['feedback']) ?></p>
+          </div>
+          <?php endif; ?>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:8px">
+            <i class="fas fa-calendar"></i> Corrigé le <?= formatDate($existingSubmission['graded_at'], 'd/m/Y') ?>
+          </div>
+        </div>
+      </div>
+
+      <!-- Verrouillage -->
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.18);border-radius:var(--radius);margin-bottom:16px">
+        <i class="fas fa-lock" style="color:var(--primary-light)"></i>
+        <span style="font-size:13px;color:var(--text-muted)">Ce travail est définitivement noté — vous ne pouvez plus le modifier.</span>
+      </div>
+
+      <!-- Consultation : travail soumis (lecture seule) -->
+      <?php if ($existingSubmission['text_response']): ?>
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:6px">Votre réponse soumise</div>
+        <div style="padding:14px;background:var(--bg-elevated);border-radius:var(--radius);font-size:13px;line-height:1.7;white-space:pre-wrap;color:var(--text)"><?= e($existingSubmission['text_response']) ?></div>
+      </div>
+      <?php endif; ?>
+      <?php if ($existingSubmission['file_path']): ?>
+      <?php
+        $gFd = json_decode($existingSubmission['file_path'], true);
+        $gFp = is_array($gFd) ? ($gFd['path'] ?? '') : $existingSubmission['file_path'];
+        $gFn = is_array($gFd) ? ($gFd['name'] ?? basename($gFp)) : basename($gFp);
+      ?>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--bg-elevated);border-radius:var(--radius)">
+        <i class="fas fa-file-alt" style="color:var(--primary-light)"></i>
+        <span style="flex:1;font-size:13px"><?= e($gFn) ?></span>
+        <?php if ($gFp && $gFp !== 'Array'): ?>
+        <a href="<?= e(uploadUrl($gFp)) ?>" target="_blank" class="btn btn-ghost btn-sm"><i class="fas fa-eye"></i> Consulter</a>
+        <?php endif; ?>
+      </div>
+      <?php endif; ?>
+
+      <?php elseif ($subStatus === 'returned'): ?>
+      <!-- ── Travail retourné — lecture seule ── -->
+      <div style="display:flex;align-items:flex-start;gap:16px;padding:16px;background:rgba(239,68,68,.06);border-radius:var(--radius);margin-bottom:16px">
+        <i class="fas fa-undo" style="color:var(--danger);font-size:24px;flex-shrink:0;margin-top:2px"></i>
+        <div style="flex:1">
+          <strong style="color:var(--danger);font-size:15px;display:block;margin-bottom:6px">Travail retourné par l'enseignant</strong>
+          <?php if ($existingSubmission['feedback']): ?>
+          <div style="padding:10px 14px;background:rgba(255,255,255,.04);border-radius:var(--radius);border-left:3px solid var(--danger)">
+            <div style="font-size:11px;font-weight:700;color:var(--danger);margin-bottom:4px;text-transform:uppercase">Commentaire</div>
+            <p style="color:var(--text);font-size:13px;font-style:italic;margin:0"><?= e($existingSubmission['feedback']) ?></p>
+          </div>
+          <?php endif; ?>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:8px">
+            <i class="fas fa-calendar"></i> Retourné le <?= formatDate($existingSubmission['graded_at'], 'd/m/Y') ?>
+          </div>
+        </div>
+      </div>
+
+      <!-- Verrouillage -->
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.18);border-radius:var(--radius);margin-bottom:16px">
+        <i class="fas fa-lock" style="color:var(--primary-light)"></i>
+        <span style="font-size:13px;color:var(--text-muted)">Ce travail a été évalué — vous ne pouvez plus le modifier ni le soumettre à nouveau.</span>
+      </div>
+
+      <!-- Consultation du travail soumis -->
+      <?php if ($existingSubmission['text_response']): ?>
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:6px">Votre réponse soumise</div>
+        <div style="padding:14px;background:var(--bg-elevated);border-radius:var(--radius);font-size:13px;line-height:1.7;white-space:pre-wrap;color:var(--text)"><?= e($existingSubmission['text_response']) ?></div>
+      </div>
+      <?php endif; ?>
+      <?php if ($existingSubmission['file_path']): ?>
+      <?php
+        $rFd = json_decode($existingSubmission['file_path'], true);
+        $rFp = is_array($rFd) ? ($rFd['path'] ?? '') : $existingSubmission['file_path'];
+        $rFn = is_array($rFd) ? ($rFd['name'] ?? basename($rFp)) : basename($rFp);
+      ?>
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--bg-elevated);border-radius:var(--radius)">
+        <i class="fas fa-file-alt" style="color:var(--primary-light)"></i>
+        <span style="flex:1;font-size:13px"><?= e($rFn) ?></span>
+        <?php if ($rFp && $rFp !== 'Array'): ?>
+        <a href="<?= e(uploadUrl($rFp)) ?>" target="_blank" class="btn btn-ghost btn-sm"><i class="fas fa-eye"></i> Consulter</a>
+        <?php endif; ?>
+      </div>
+      <?php endif; ?>
+
+      <?php elseif ($subStatus === 'submitted' || $subStatus === 'under_review'): ?>
+      <!-- ── En attente de correction ── -->
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;background:rgba(245,158,11,.08);border-radius:var(--radius)">
+        <i class="fas fa-clock" style="color:var(--warning);font-size:20px"></i>
+        <div>
+          <div style="font-weight:600;color:var(--text)">Correction en attente</div>
+          <div style="font-size:12px;color:var(--text-muted)">Soumis le <?= formatDate($existingSubmission['submitted_at'], 'd/m/Y à H:i') ?></div>
+        </div>
+      </div>
+
+      <?php else: ?>
+      <!-- ── Formulaire de soumission (première soumission uniquement) ── -->
+      <form method="POST" enctype="multipart/form-data">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="submit_case_study">
+        <input type="hidden" name="formation_id" value="<?= $enrolledFormationId ?>">
+
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px">
+            <i class="fas fa-pen" style="color:var(--primary-light)"></i> Votre réponse / analyse
+          </label>
+          <textarea name="text_response" class="form-control" rows="6"
+            placeholder="Rédigez votre analyse, vos réponses aux questions, vos observations..."
+            style="resize:vertical"></textarea>
+        </div>
+
+        <div style="margin-bottom:20px">
+          <label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px">
+            <i class="fas fa-paperclip" style="color:var(--primary-light)"></i> Joindre un document
+            <span style="color:var(--text-faint);font-weight:400">(optionnel — PDF, Word, max 10 Mo)</span>
+          </label>
+          <input type="file" name="submission_file" class="form-control" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt">
+        </div>
+
+        <button type="submit" class="btn btn-primary"
+          onclick="return confirm('Soumettre votre travail à l\'enseignant ?')">
+          <i class="fas fa-paper-plane"></i> Soumettre mon travail
+        </button>
+      </form>
+      <?php endif; ?>
+
+    </div>
+  </div>
   <?php endif; ?>
 
   <?php if (!empty($resources)): ?>
