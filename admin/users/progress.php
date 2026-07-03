@@ -1,7 +1,7 @@
 <?php
 require_once dirname(dirname(__DIR__)) . '/config/config.php';
 require_once dirname(dirname(__DIR__)) . '/includes/layout.php';
-requireAdmin();
+requirePedagogy();
 
 $pdo    = getDB();
 $userId = (int)($_GET['id'] ?? 0);
@@ -229,11 +229,12 @@ foreach ($enrollments as $enr) {
 // ── Render ───────────────────────────────────────────────────
 $name = e($student['first_name'] . ' ' . $student['last_name']);
 renderHead('Suivi pédagogique — ' . $name);
-renderSidebar('admin');
+$viewerRole = currentUser()['role'] ?? 'admin';
+renderSidebar($viewerRole === 'pedagogy' ? 'pedagogy' : 'admin');
 renderTopbar('Suivi pédagogique', [
-    ['Utilisateurs', url('admin/users/index.php')],
-    [$name, url('admin/users/edit.php?id='.$userId)],
-    ['Progression', '']
+    [$viewerRole === 'pedagogy' ? 'Pédagogie' : 'Administration', url($viewerRole === 'pedagogy' ? 'pedagogy/index.php' : 'admin/index.php')],
+    ['Apprenants', url('admin/users/index.php')],
+    [$name, ''],
 ]);
 ?>
 <div class="page-content fade-in">
