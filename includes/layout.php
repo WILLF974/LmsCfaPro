@@ -136,6 +136,10 @@ function renderSidebar(string $role): void {
     <a href="<?= url('student/profile/index.php') ?>" class="nav-link <?= currentUrlContains('/profile') ? 'active' : '' ?>">
       <i class="fas fa-user"></i> Mon profil
     </a>
+    <a href="<?= url('student/notifications/index.php') ?>" class="nav-link <?= currentUrlContains('/student/notifications') ? 'active' : '' ?>">
+      <i class="fas fa-bell"></i> Corrections
+      <?php if ($unreadNotif > 0): ?><span class="nav-badge" data-notif><?= $unreadNotif ?></span><?php endif; ?>
+    </a>
 <?php endif; ?>
 
     <div class="nav-section-title">Messages</div>
@@ -223,7 +227,7 @@ function renderTopbar(string $title, array $breadcrumb = []): void {
     <div style="position:relative">
       <button class="btn-icon" id="notif-btn" title="Notifications">
         <i class="fas fa-bell"></i>
-        <?php if ($unreadNotif > 0): ?><span class="notif-dot"></span><?php endif; ?>
+        <?php if ($unreadNotif > 0): ?><span class="notif-count"><?= $unreadNotif ?></span><?php endif; ?>
       </button>
       <div class="notif-panel" id="notif-panel">
         <div class="notif-header">
@@ -240,7 +244,11 @@ function renderTopbar(string $title, array $breadcrumb = []): void {
         <div class="notif-item <?= !$n['read_at'] ? 'unread' : '' ?>">
           <?php if (!$n['read_at']): ?><div class="notif-dot"></div><?php endif; ?>
           <div class="notif-body">
+            <?php if ($n['action_url']): ?>
+            <a href="<?= e($n['action_url']) ?>" class="notif-title" style="text-decoration:none;color:white"><?= e($n['title']) ?></a>
+            <?php else: ?>
             <div class="notif-title"><?= e($n['title']) ?></div>
+            <?php endif; ?>
             <div class="notif-text"><?= e($n['message']) ?></div>
             <div class="notif-time"><?= timeAgo($n['created_at']) ?></div>
           </div>

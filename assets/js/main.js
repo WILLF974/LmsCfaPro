@@ -145,7 +145,7 @@ function initNotifications() {
 function markNotificationsRead() {
   fetchJSON('/api/notifications.php', { method: 'POST', body: JSON.stringify({ action: 'mark_read' }) })
     .then(() => {
-      const dot = $('.notif-dot', $('#notif-btn'));
+      const dot = $('.notif-count', $('#notif-btn'));
       if (dot) dot.remove();
       const badge = $('.nav-badge[data-notif]');
       if (badge) badge.remove();

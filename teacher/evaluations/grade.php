@@ -94,6 +94,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($type === 'quiz') {
             $pdo->prepare("UPDATE quiz_attempts SET review_status='not_submitted', submitted_for_review=0, teacher_feedback=?, graded_by=?, graded_at=NOW() WHERE id=?")
                 ->execute([$feedback ?: null, $teacherId, $subId]);
+            try {
+                $retMsg = 'Votre quiz "' . $submission['quiz_title'] . '" vous a été retourné pour révision.';
+                if ($feedback) $retMsg .= ' Commentaire : ' . mb_strimwidth($feedback, 0, 120, '…');
+                createNotification($submission['user_id'], 'Quiz retourné pour révision', $retMsg, 'warning',
+                    url('student/quiz/take.php?id=' . $submission['quiz_id'] . '&formation_id=' . ($submission['formation_id'] ?? 0)));
+            } catch (Exception $e) {}
         } else {
             $pdo->prepare("UPDATE case_study_submissions SET status='returned', feedback=?, graded_by=?, graded_at=NOW() WHERE id=?")
                 ->execute([$feedback ?: null, $teacherId, $subId]);
@@ -109,6 +115,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($type === 'quiz') {
             $pdo->prepare("UPDATE quiz_attempts SET review_status='graded', teacher_score=?, teacher_feedback=?, graded_by=?, graded_at=NOW() WHERE id=?")
                 ->execute([$score, $feedback ?: null, $teacherId, $subId]);
+            try {
+                $notifMsg = 'Votre quiz "' . $submission['quiz_title'] . '" a été corrigé';
+                if ($score !== null) $notifMsg .= ' — Note : ' . $score . '/20';
+                $notifMsg .= '.';
+                createNotification($submission['user_id'], 'Quiz corrigé par votre enseignant', $notifMsg, 'success',
+                    url('student/quiz/take.php?id=' . $submission['quiz_id'] . '&formation_id=' . ($submission['formation_id'] ?? 0) . '&result=' . $subId));
+            } catch (Exception $e) {}
         } else {
             $pdo->prepare("UPDATE case_study_submissions SET status='graded', score=?, grade=?, feedback=?, graded_by=?, graded_at=NOW() WHERE id=?")
                 ->execute([$score, $grade ?: null, $feedback ?: null, $teacherId, $subId]);
