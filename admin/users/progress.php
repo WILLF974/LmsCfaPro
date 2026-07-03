@@ -242,6 +242,107 @@ foreach ($enrollments as $enr) {
     }
 
     $formationsData[$fId] = compact('sequences','modulesBySeq','freeModules','quizzesByMod','standaloneQuizzes','blocs','compsByBloc','seqStats');
+
+    // ── Arborescence RNCP ────────────────────────────────────────
+    $rncpTree = [];
+    try {
+    // Séquences avec chaîne RNCP complète
+    $chainStmt = $pdo->prepare("
+        SELECT seq.id as seq_id, seq.title as seq_title, seq.order_num as seq_order,
+               c.id as comp_id, c.code as comp_code, c.title as comp_title, c.order_num as comp_order,
+               at.id as at_id, at.code as at_code, at.title as at_title, at.order_num as at_order,
+               rt.id as rncp_id, rt.rncp_code, rt.title as rncp_title
+        FROM sequences seq
+        LEFT JOIN competencies c ON seq.competency_id = c.id
+        LEFT JOIN activity_types at ON c.activity_type_id = at.id
+        LEFT JOIN rncp_titles rt ON at.rncp_title_id = rt.id
+        WHERE seq.formation_id = ?
+        ORDER BY at.order_num, c.order_num, seq.order_num
+    ");
+    $chainStmt->execute([$fId]);
+
+    // Quiz avec dernière tentative réussie (ou en cours)
+    $qzByMod = []; $qzByComp = [];
+    $qzRncpStmt = $pdo->prepare("
+        SELECT q.id as qid, q.title as qtitle, q.passing_score, q.xp_reward,
+               q.module_id, q.competency_id,
+               qa.started_at, qa.completed_at, qa.time_spent_seconds,
+               qa.score, qa.passed, qa.teacher_score, qa.review_status
+        FROM quizzes q
+        LEFT JOIN quiz_attempts qa ON qa.quiz_id = q.id AND qa.user_id = ?
+            AND qa.id = (SELECT MAX(id) FROM quiz_attempts
+                         WHERE quiz_id = q.id AND user_id = ? AND status = 'completed')
+        WHERE q.formation_id = ?
+           OR q.module_id IN (
+               SELECT m2.id FROM modules m2
+               LEFT JOIN sequences s2 ON m2.sequence_id = s2.id
+               WHERE m2.formation_id = ? OR s2.formation_id = ?
+           )
+    ");
+    $qzRncpStmt->execute([$userId, $userId, $fId, $fId, $fId]);
+    foreach ($qzRncpStmt->fetchAll() as $qz) {
+        if ($qz['module_id'])     $qzByMod[$qz['module_id']][]     = $qz;
+        elseif ($qz['competency_id']) $qzByComp[$qz['competency_id']][] = $qz;
+    }
+
+    // Études de cas soumises
+    $csByComp = [];
+    try {
+        $csRncpStmt = $pdo->prepare("
+            SELECT cs.id as cs_id, cs.title as cs_title, cs.competency_id,
+                   css.submitted_at, css.graded_at, css.score, css.max_score, css.status, css.grade
+            FROM case_study_submissions css
+            JOIN case_studies cs ON css.case_study_id = cs.id
+            WHERE css.user_id = ? AND cs.competency_id IN (
+                SELECT c2.id FROM competencies c2
+                JOIN activity_types at2 ON c2.activity_type_id = at2.id
+                WHERE at2.rncp_title_id = (SELECT rncp_title_id FROM formations WHERE id = ?)
+            )
+        ");
+        $csRncpStmt->execute([$userId, $fId]);
+        foreach ($csRncpStmt->fetchAll() as $cs) {
+            if ($cs['competency_id']) $csByComp[$cs['competency_id']][] = $cs;
+        }
+    } catch (Exception $e) {}
+
+    // Construire l'arbre RNCP → AT → Comp → Séquence → Séance
+    $rncpTree = [];
+    foreach ($chainStmt->fetchAll() as $row) {
+        $rId  = $row['rncp_id']  ?? 0;
+        $atId = $row['at_id']    ?? 0;
+        $cId  = $row['comp_id']  ?? 0;
+        $sId  = $row['seq_id'];
+
+        if (!isset($rncpTree[$rId])) {
+            $rncpTree[$rId] = ['code'=>$row['rncp_code'], 'title'=>$row['rncp_title'], 'ats'=>[]];
+        }
+        if (!isset($rncpTree[$rId]['ats'][$atId])) {
+            $rncpTree[$rId]['ats'][$atId] = ['code'=>$row['at_code'], 'title'=>$row['at_title'], 'order'=>(int)$row['at_order'], 'comps'=>[]];
+        }
+        if (!isset($rncpTree[$rId]['ats'][$atId]['comps'][$cId])) {
+            $rncpTree[$rId]['ats'][$atId]['comps'][$cId] = [
+                'code' => $row['comp_code'], 'title' => $row['comp_title'], 'order' => (int)$row['comp_order'],
+                'seqs' => [],
+                'quizzes' => $qzByComp[$cId] ?? [],
+                'case_studies' => $csByComp[$cId] ?? [],
+            ];
+        }
+
+        // Séances de la séquence, avec leurs quiz
+        $seqMods = $modulesBySeq[$sId] ?? [];
+        foreach ($seqMods as &$sm) {
+            $sm['quizzes'] = $qzByMod[$sm['id']] ?? [];
+        }
+        unset($sm);
+
+        $rncpTree[$rId]['ats'][$atId]['comps'][$cId]['seqs'][$sId] = [
+            'id'=>$sId, 'title'=>$row['seq_title'], 'order'=>(int)$row['seq_order'],
+            'modules'=>$seqMods,
+        ];
+    }
+
+    $formationsData[$fId]['rncpTree'] = $rncpTree;
+    } catch (Exception $e) { $formationsData[$fId]['rncpTree'] = []; }
 }
 
 // ── Render ───────────────────────────────────────────────────
@@ -399,6 +500,236 @@ renderTopbar('Suivi pédagogique', [
           </div>
           <?php endforeach; ?>
         </div>
+      </div>
+      <?php endif; ?>
+
+      <!-- ── ARBORESCENCE RNCP ── -->
+      <?php if (!empty($fData['rncpTree'])): ?>
+      <div>
+        <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:10px"><i class="fas fa-sitemap" style="margin-right:6px"></i>Arborescence RNCP</div>
+
+        <?php foreach ($fData['rncpTree'] as $rId => $rncp):
+          $rTotal=0; $rDone=0;
+          foreach ($rncp['ats'] as $at2) foreach ($at2['comps'] as $c2) foreach ($c2['seqs'] as $s2) foreach ($s2['modules'] as $m2) { $rTotal++; if ($m2['prog_status']==='completed') $rDone++; }
+          $rPct = $rTotal>0?round($rDone/$rTotal*100):0;
+        ?>
+        <div style="margin-bottom:14px;border:1px solid rgba(99,102,241,.3);border-radius:var(--radius-lg);overflow:hidden">
+
+          <!-- Niveau RNCP -->
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:rgba(99,102,241,.12);cursor:pointer" onclick="toggleSection('rncp-<?=$fId?>-<?=$rId?>')">
+            <i class="fas fa-graduation-cap" style="color:var(--primary-light);font-size:15px;flex-shrink:0"></i>
+            <div style="flex:1;min-width:0">
+              <?php if ($rncp['code']): ?><span class="badge badge-primary" style="font-size:10px;margin-bottom:4px"><?= e($rncp['code']) ?></span> <?php endif; ?>
+              <span style="font-size:14px;font-weight:800;color:white"><?= e($rncp['title'] ?? 'Titre RNCP') ?></span>
+            </div>
+            <div style="flex-shrink:0;display:flex;align-items:center;gap:10px">
+              <?php if ($rTotal>0): ?>
+              <div style="text-align:right">
+                <div style="font-size:15px;font-weight:800;color:<?= $rPct===100?'var(--success)':'var(--primary-light)' ?>"><?= $rPct ?>%</div>
+                <div style="font-size:10px;color:var(--text-faint)"><?= $rDone ?>/<?= $rTotal ?> séances</div>
+              </div>
+              <?php endif; ?>
+              <i class="fas fa-chevron-down" id="chev-rncp-<?=$fId?>-<?=$rId?>" style="color:var(--text-muted);transition:.2s"></i>
+            </div>
+          </div>
+
+          <div id="rncp-<?=$fId?>-<?=$rId?>">
+            <?php foreach ($rncp['ats'] as $atId => $at):
+              $atTotal=0; $atDone=0;
+              foreach ($at['comps'] as $c2) foreach ($c2['seqs'] as $s2) foreach ($s2['modules'] as $m2) { $atTotal++; if ($m2['prog_status']==='completed') $atDone++; }
+              $atPct = $atTotal>0?round($atDone/$atTotal*100):0;
+            ?>
+            <!-- Niveau AT -->
+            <div style="border-top:1px solid var(--border)">
+              <div style="display:flex;align-items:center;gap:12px;padding:12px 18px 12px 30px;background:rgba(139,92,246,.07);cursor:pointer" onclick="toggleSection('at-<?=$fId?>-<?=$atId?>')">
+                <i class="fas fa-layer-group" style="color:#a78bfa;font-size:13px;flex-shrink:0"></i>
+                <div style="flex:1;min-width:0">
+                  <?php if ($at['code']): ?><span class="badge badge-secondary" style="font-size:10px"><?= e($at['code']) ?></span> <?php endif; ?>
+                  <span style="font-size:13px;font-weight:700;color:white"><?= e($at['title'] ?? 'Activité Type') ?></span>
+                </div>
+                <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
+                  <?php if ($atTotal>0): ?>
+                  <span style="font-size:13px;font-weight:700;color:<?= $atPct===100?'var(--success)':'#a78bfa' ?>"><?= $atPct ?>%</span>
+                  <span style="font-size:10px;color:var(--text-faint)"><?= $atDone ?>/<?= $atTotal ?></span>
+                  <?php endif; ?>
+                  <i class="fas fa-chevron-down" id="chev-at-<?=$fId?>-<?=$atId?>" style="color:var(--text-muted);transition:.2s"></i>
+                </div>
+              </div>
+
+              <div id="at-<?=$fId?>-<?=$atId?>">
+                <?php foreach ($at['comps'] as $cId => $comp):
+                  $cTotal=0; $cDone=0;
+                  foreach ($comp['seqs'] as $s2) foreach ($s2['modules'] as $m2) { $cTotal++; if ($m2['prog_status']==='completed') $cDone++; }
+                  $cPct = $cTotal>0?round($cDone/$cTotal*100):0;
+                ?>
+                <!-- Niveau Compétence -->
+                <div style="border-top:1px solid rgba(255,255,255,.04)">
+                  <div style="display:flex;align-items:center;gap:10px;padding:10px 18px 10px 44px;background:rgba(59,130,246,.04);cursor:pointer" onclick="toggleSection('comp-<?=$fId?>-<?=$cId?>')">
+                    <i class="fas fa-bullseye" style="color:#60a5fa;font-size:12px;flex-shrink:0"></i>
+                    <div style="flex:1;min-width:0">
+                      <?php if ($comp['code']): ?><span style="font-size:10px;padding:1px 6px;background:rgba(59,130,246,.15);border-radius:99px;color:#60a5fa;border:1px solid rgba(59,130,246,.3)"><?= e($comp['code']) ?></span> <?php endif; ?>
+                      <span style="font-size:13px;font-weight:600;color:white"><?= e($comp['title'] ?? 'Compétence') ?></span>
+                    </div>
+                    <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
+                      <?php if ($cTotal>0): ?>
+                      <span style="font-size:12px;font-weight:700;color:<?= $cPct===100?'var(--success)':'#60a5fa' ?>"><?= $cPct ?>%</span>
+                      <span style="font-size:10px;color:var(--text-faint)"><?= $cDone ?>/<?= $cTotal ?></span>
+                      <?php endif; ?>
+                      <?php if (!empty($comp['case_studies'])): ?><span class="badge badge-secondary" style="font-size:9px"><?= count($comp['case_studies']) ?> ét. de cas</span><?php endif; ?>
+                      <?php if (!empty($comp['quizzes'])): ?><span class="badge badge-secondary" style="font-size:9px"><?= count($comp['quizzes']) ?> quiz</span><?php endif; ?>
+                      <i class="fas fa-chevron-down" id="chev-comp-<?=$fId?>-<?=$cId?>" style="color:var(--text-muted);transition:.2s;transform:rotate(-90deg)"></i>
+                    </div>
+                  </div>
+
+                  <div id="comp-<?=$fId?>-<?=$cId?>" style="display:none">
+                    <?php foreach ($comp['seqs'] as $sId => $seq):
+                      $sTotal2 = count($seq['modules']);
+                      $sDone2  = count(array_filter($seq['modules'], fn($m) => $m['prog_status']==='completed'));
+                      $sPct2   = $sTotal2>0?round($sDone2/$sTotal2*100):0;
+                    ?>
+                    <!-- Niveau Séquence -->
+                    <div style="border-top:1px solid rgba(255,255,255,.03)">
+                      <div style="display:flex;align-items:center;gap:10px;padding:9px 18px 9px 56px;background:var(--bg-elevated);cursor:pointer" onclick="toggleSection('cseq-<?=$fId?>-<?=$sId?>')">
+                        <i class="fas fa-stream" style="color:var(--text-faint);font-size:11px;flex-shrink:0"></i>
+                        <span style="flex:1;font-size:12px;font-weight:600;color:var(--text-muted)"><?= e($seq['title']) ?></span>
+                        <div style="flex-shrink:0;display:flex;align-items:center;gap:6px">
+                          <?php if ($sTotal2>0): ?>
+                          <span style="font-size:11px;font-weight:700;color:<?= $sPct2===100?'var(--success)':'var(--text-muted)' ?>"><?= $sPct2 ?>%</span>
+                          <span style="font-size:10px;color:var(--text-faint)"><?= $sDone2 ?>/<?= $sTotal2 ?></span>
+                          <?php endif; ?>
+                          <i class="fas fa-chevron-down" id="chev-cseq-<?=$fId?>-<?=$sId?>" style="color:var(--text-faint);font-size:10px;transition:.2s;transform:rotate(-90deg)"></i>
+                        </div>
+                      </div>
+
+                      <div id="cseq-<?=$fId?>-<?=$sId?>" style="display:none">
+                        <?php if (!empty($seq['modules'])): ?>
+                        <div style="overflow-x:auto;border-top:1px solid rgba(255,255,255,.03)">
+                          <table style="width:100%;border-collapse:collapse;font-size:12px">
+                            <thead>
+                              <tr style="background:var(--bg-surface)">
+                                <th style="padding:6px 12px 6px 68px;text-align:left;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em">Séance / Évaluation</th>
+                                <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Statut</th>
+                                <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Début</th>
+                                <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Fin</th>
+                                <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Durée</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <?php foreach ($seq['modules'] as $m):
+                                $mst = $m['prog_status'] ?? 'not_started';
+                              ?>
+                              <tr style="border-top:1px solid rgba(255,255,255,.03);background:<?= $mst==='completed'?'rgba(16,185,129,.03)':($mst==='in_progress'?'rgba(99,102,241,.03)':'') ?>">
+                                <td style="padding:8px 12px 8px 68px">
+                                  <div style="display:flex;align-items:center;gap:8px">
+                                    <i class="<?= getContentTypeIcon($m['content_type']) ?>" style="color:var(--text-faint);font-size:11px;width:12px;flex-shrink:0"></i>
+                                    <span style="color:<?= $mst==='completed'?'var(--text-muted)':'var(--text)' ?>"><?= e($m['title']) ?></span>
+                                    <?php if (!$m['is_mandatory']): ?><span class="badge badge-secondary" style="font-size:9px">Opt.</span><?php endif; ?>
+                                  </div>
+                                </td>
+                                <td style="padding:8px 12px;text-align:center">
+                                  <?php if ($mst==='completed'): ?><span class="badge badge-success" style="font-size:10px"><i class="fas fa-check"></i> Validée</span>
+                                  <?php elseif ($mst==='in_progress'): ?><span class="badge badge-primary" style="font-size:10px"><i class="fas fa-play"></i> En cours</span>
+                                  <?php else: ?><span class="badge badge-secondary" style="font-size:10px">À faire</span><?php endif; ?>
+                                </td>
+                                <td style="padding:8px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= $m['started_at'] ? formatDateTime($m['started_at']) : '—' ?></td>
+                                <td style="padding:8px 12px;text-align:center;color:<?= $m['completed_at']?'var(--success)':'var(--text-muted)' ?>;white-space:nowrap;font-size:11px"><?= $m['completed_at'] ? formatDateTime($m['completed_at']) : '—' ?></td>
+                                <td style="padding:8px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= fmtSeconds((int)($m['time_spent_seconds'] ?? 0)) ?></td>
+                              </tr>
+                              <?php foreach ($m['quizzes'] as $qz):
+                                $qPassed = (bool)$qz['passed'];
+                                $qScore  = $qz['teacher_score'] ?? $qz['score'];
+                              ?>
+                              <tr style="border-top:1px solid rgba(255,255,255,.02);background:rgba(251,191,36,.04)">
+                                <td style="padding:7px 12px 7px 80px">
+                                  <div style="display:flex;align-items:center;gap:8px">
+                                    <i class="fas fa-question-circle" style="color:var(--warning);font-size:11px;flex-shrink:0"></i>
+                                    <span style="color:var(--text-muted);font-style:italic"><?= e($qz['qtitle']) ?></span>
+                                    <?php if ($qPassed): ?><i class="fas fa-trophy" style="color:var(--warning);font-size:10px"></i><?php endif; ?>
+                                  </div>
+                                </td>
+                                <td style="padding:7px 12px;text-align:center">
+                                  <?php if (!$qz['started_at']): ?><span class="badge badge-secondary" style="font-size:10px">Non démarré</span>
+                                  <?php elseif ($qPassed): ?><span class="badge badge-success" style="font-size:10px">Réussi<?= $qScore!==null?' — '.round($qScore).'%':'' ?></span>
+                                  <?php elseif ($qz['review_status']==='returned'): ?><span class="badge badge-warning" style="font-size:10px">Retourné</span>
+                                  <?php elseif ($qz['completed_at']): ?><span class="badge badge-danger" style="font-size:10px">Échoué<?= $qScore!==null?' — '.round($qScore).'%':'' ?></span>
+                                  <?php else: ?><span class="badge badge-primary" style="font-size:10px">En cours</span><?php endif; ?>
+                                </td>
+                                <td style="padding:7px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= $qz['started_at'] ? formatDateTime($qz['started_at']) : '—' ?></td>
+                                <td style="padding:7px 12px;text-align:center;color:<?= $qz['completed_at']?($qPassed?'var(--success)':'var(--danger)'):'var(--text-muted)' ?>;white-space:nowrap;font-size:11px"><?= $qz['completed_at'] ? formatDateTime($qz['completed_at']) : '—' ?></td>
+                                <td style="padding:7px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= fmtSeconds((int)($qz['time_spent_seconds'] ?? 0)) ?></td>
+                              </tr>
+                              <?php endforeach; ?>
+                              <?php endforeach; ?>
+                            </tbody>
+                          </table>
+                        </div>
+                        <?php else: ?>
+                        <div style="padding:10px 14px 10px 68px;color:var(--text-faint);font-size:12px;border-top:1px solid rgba(255,255,255,.03)">Aucune séance dans cette séquence.</div>
+                        <?php endif; ?>
+                      </div><!-- /cseq body -->
+                    </div><!-- /séquence -->
+                    <?php endforeach; ?>
+
+                    <!-- Quiz de compétence -->
+                    <?php foreach ($comp['quizzes'] as $qz):
+                      $qPassed2 = (bool)$qz['passed'];
+                      $qScore2  = $qz['teacher_score'] ?? $qz['score'];
+                    ?>
+                    <div style="border-top:1px solid rgba(255,255,255,.03);padding:9px 18px 9px 56px;display:flex;align-items:center;gap:10px;background:rgba(251,191,36,.03)">
+                      <i class="fas fa-question-circle" style="color:var(--warning);font-size:12px;flex-shrink:0"></i>
+                      <div style="flex:1;min-width:0">
+                        <span style="font-size:12px;font-weight:600;color:var(--text-muted)"><?= e($qz['qtitle']) ?></span>
+                        <?php if ($qz['started_at']): ?>
+                        <div style="font-size:10px;color:var(--text-faint);margin-top:2px;display:flex;gap:12px;flex-wrap:wrap">
+                          <span>Début : <?= formatDateTime($qz['started_at']) ?></span>
+                          <?php if ($qz['completed_at']): ?><span>Fin : <?= formatDateTime($qz['completed_at']) ?></span><?php endif; ?>
+                          <?php if ($qz['time_spent_seconds']): ?><span>Durée : <?= fmtSeconds((int)$qz['time_spent_seconds']) ?></span><?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                      </div>
+                      <div style="flex-shrink:0">
+                        <?php if (!$qz['started_at']): ?><span class="badge badge-secondary" style="font-size:10px">Non démarré</span>
+                        <?php elseif ($qPassed2): ?><span class="badge badge-success" style="font-size:10px"><i class="fas fa-trophy"></i> <?= $qScore2!==null?round($qScore2).'%':'' ?></span>
+                        <?php elseif ($qz['review_status']==='returned'): ?><span class="badge badge-warning" style="font-size:10px">Retourné</span>
+                        <?php elseif ($qz['completed_at']): ?><span class="badge badge-danger" style="font-size:10px"><?= $qScore2!==null?round($qScore2).'%':'Échoué' ?></span>
+                        <?php else: ?><span class="badge badge-primary" style="font-size:10px">En cours</span><?php endif; ?>
+                      </div>
+                    </div>
+                    <?php endforeach; ?>
+
+                    <!-- Études de cas -->
+                    <?php foreach ($comp['case_studies'] as $cs):
+                      $csStatus = $cs['status'] ?? 'pending';
+                    ?>
+                    <div style="border-top:1px solid rgba(255,255,255,.03);padding:9px 18px 9px 56px;display:flex;align-items:center;gap:10px;background:rgba(16,185,129,.02)">
+                      <i class="fas fa-file-alt" style="color:var(--success);font-size:12px;flex-shrink:0"></i>
+                      <div style="flex:1;min-width:0">
+                        <span style="font-size:12px;font-weight:600;color:var(--text-muted)"><?= e($cs['cs_title']) ?></span>
+                        <?php if ($cs['submitted_at']): ?>
+                        <div style="font-size:10px;color:var(--text-faint);margin-top:2px;display:flex;gap:12px;flex-wrap:wrap">
+                          <span>Soumis : <?= formatDateTime($cs['submitted_at']) ?></span>
+                          <?php if ($cs['graded_at']): ?><span>Corrigé : <?= formatDateTime($cs['graded_at']) ?></span><?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                      </div>
+                      <div style="flex-shrink:0">
+                        <?php if ($csStatus==='graded'): ?><span class="badge badge-success" style="font-size:10px"><?= $cs['score']!==null?$cs['score'].'/'.$cs['max_score']:'Corrigé' ?></span>
+                        <?php elseif ($csStatus==='submitted'): ?><span class="badge badge-primary" style="font-size:10px">Soumis</span>
+                        <?php elseif ($csStatus==='returned'): ?><span class="badge badge-warning" style="font-size:10px">Retourné</span>
+                        <?php else: ?><span class="badge badge-secondary" style="font-size:10px">Non soumis</span><?php endif; ?>
+                      </div>
+                    </div>
+                    <?php endforeach; ?>
+
+                  </div><!-- /comp body -->
+                </div><!-- /comp block -->
+                <?php endforeach; ?><!-- /comps -->
+              </div><!-- /at body -->
+            </div><!-- /at block -->
+            <?php endforeach; ?><!-- /ats -->
+          </div><!-- /rncp body -->
+        </div><!-- /rncp block -->
+        <?php endforeach; ?><!-- /rncpTree -->
       </div>
       <?php endif; ?>
 

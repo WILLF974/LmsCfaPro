@@ -125,12 +125,26 @@ function uploadFile(array $file, string $destination, array $allowedTypes = [], 
  */
 function formatDate(string $date, string $format = 'd/m/Y'): string {
     if (!$date) return '-';
-    return date($format, strtotime($date));
+    try {
+        $dt = new DateTimeImmutable($date);
+        return $dt->format($format);
+    } catch (Exception) { return '-'; }
 }
 
 function formatDateTime(string $date): string {
     if (!$date) return '-';
-    return date('d/m/Y H:i', strtotime($date));
+    try {
+        $dt = new DateTimeImmutable($date);
+        return $dt->format('d/m/Y H:i');
+    } catch (Exception) { return '-'; }
+}
+
+function fmtSeconds(int $sec): string {
+    if ($sec <= 0) return '—';
+    $h = intdiv($sec, 3600);
+    $m = intdiv($sec % 3600, 60);
+    if ($h > 0) return $h . 'h' . ($m > 0 ? str_pad($m, 2, '0', STR_PAD_LEFT) . 'min' : '');
+    return $m > 0 ? $m . 'min' : '<1min';
 }
 
 function formatDuration(int $minutes): string {
