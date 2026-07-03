@@ -91,6 +91,9 @@ function renderSidebar(string $role): void {
     <a href="<?= url('admin/formations/index.php') ?>" class="nav-link <?= currentUrlContains('/formations') ? 'active' : '' ?>">
       <i class="fas fa-graduation-cap"></i> Formations
     </a>
+    <a href="<?= url('pedagogy/sequences/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/sequences') ? 'active' : '' ?>">
+      <i class="fas fa-list-ol"></i> Séquences
+    </a>
     <a href="<?= url('admin/users/index.php?role=student') ?>" class="nav-link <?= currentUrlContains('/admin/users') ? 'active' : '' ?>">
       <i class="fas fa-users"></i> Apprenants
     </a>
@@ -104,7 +107,7 @@ function renderSidebar(string $role): void {
       <i class="fas fa-home"></i> Tableau de bord
     </a>
     <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= currentUrlContains('/courses') ? 'active' : '' ?>">
-      <i class="fas fa-book-open"></i> Mes capsules
+      <i class="fas fa-list-ol"></i> Séances / Séquences
     </a>
     <a href="<?= url('teacher/quizzes/index.php') ?>" class="nav-link <?= currentUrlContains('/quizzes') ? 'active' : '' ?>">
       <i class="fas fa-question-circle"></i> Quiz & Éval
