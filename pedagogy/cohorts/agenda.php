@@ -142,6 +142,16 @@ foreach ($entries as $e) {
     $byDay[(int)date('j', strtotime($e['scheduled_date']))][] = $e;
 }
 
+// Séances de chaque séquence liée (pour affichage dans l'agenda)
+$usedSeqIds = array_values(array_filter(array_unique(array_column($entries, 'sequence_id'))));
+$seqModules = [];
+if (!empty($usedSeqIds)) {
+    $ph  = implode(',', array_fill(0, count($usedSeqIds), '?'));
+    $msq = $pdo->prepare("SELECT id, sequence_id, title, order_num FROM modules WHERE sequence_id IN ($ph) ORDER BY sequence_id, order_num");
+    $msq->execute($usedSeqIds);
+    foreach ($msq->fetchAll() as $mod) $seqModules[$mod['sequence_id']][] = $mod;
+}
+
 // ── Hiérarchie RNCP pour la cascade ─────────────────────────
 $rncpTitles   = $pdo->query("SELECT id, rncp_code, title FROM rncp_titles ORDER BY rncp_code")->fetchAll(PDO::FETCH_ASSOC);
 $actTypes     = $pdo->query("SELECT id, rncp_title_id, code, title FROM activity_types ORDER BY order_num")->fetchAll(PDO::FETCH_ASSOC);
@@ -299,10 +309,24 @@ renderTopbar('Cahier de texte', $breadcrumbs);
                   <div style="font-size:13px;color:var(--text-muted);white-space:pre-wrap;line-height:1.5;margin-bottom:8px"><?= e($e['instructions']) ?></div>
                   <?php endif; ?>
                   <?php if ($e['module_title'] || $e['seq_title']): ?>
-                  <div style="display:inline-flex;align-items:center;gap:5px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:99px;padding:3px 10px;font-size:11px;color:var(--primary-light);margin-bottom:8px">
+                  <div style="display:inline-flex;align-items:center;gap:5px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:99px;padding:3px 10px;font-size:11px;color:var(--primary-light);margin-bottom:4px">
                     <i class="fas fa-link" style="font-size:9px"></i>
-                    <?= e($e['module_title'] ?: ($e['seq_title'].' — toute la séquence')) ?>
+                    <?= e($e['module_title'] ?: $e['seq_title']) ?>
+                    <?php if (!$e['module_id'] && $e['sequence_id']): ?><span style="color:var(--text-faint)">&nbsp;— séquence entière</span><?php endif; ?>
                   </div>
+                  <?php if (!$e['module_id'] && $e['sequence_id'] && !empty($seqModules[$e['sequence_id']])): ?>
+                  <div style="margin-top:4px;margin-bottom:8px;background:rgba(0,0,0,.25);border-radius:6px;padding:8px 10px">
+                    <div style="font-size:9px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Séances incluses :</div>
+                    <?php foreach ($seqModules[$e['sequence_id']] as $si => $smod): ?>
+                    <div style="font-size:12px;color:var(--text-muted);padding:2px 0;display:flex;gap:6px">
+                      <span style="font-size:10px;font-weight:700;color:var(--primary-light);flex-shrink:0;min-width:14px"><?= $si+1 ?>.</span>
+                      <span><?= e($smod['title']) ?></span>
+                    </div>
+                    <?php endforeach; ?>
+                  </div>
+                  <?php else: ?>
+                  <div style="margin-bottom:8px"></div>
+                  <?php endif; ?>
                   <?php endif; ?>
                   <!-- Auteur -->
                   <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
@@ -416,12 +440,30 @@ renderTopbar('Cahier de texte', $breadcrumbs);
             <select id="cas-comp" class="form-control" onchange="cascadeSeq(this.value)" disabled>
               <option value="">— Compétence —</option>
             </select>
-            <select id="cas-seq" name="sequence_id" class="form-control" onchange="cascadeMod(this.value)" disabled>
-              <option value="">— Séquence (lier la séquence entière) —</option>
+            <select id="cas-seq" name="sequence_id" class="form-control" onchange="onSeqChange(this.value)" disabled>
+              <option value="">— Séquence —</option>
             </select>
-            <select id="cas-mod" name="module_id" class="form-control" disabled>
-              <option value="">— Séance spécifique (optionnel) —</option>
-            </select>
+            <!-- Choix après sélection d'une séquence -->
+            <div id="seq-choice-area" style="display:none;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:6px;padding:10px 12px">
+              <div style="display:flex;gap:20px;margin-bottom:8px">
+                <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:white">
+                  <input type="radio" id="seq-whole" name="_seq_choice" value="whole" checked onchange="onSeqChoice('whole')">
+                  <span><i class="fas fa-list" style="font-size:10px;color:var(--primary-light)"></i> Toute la séquence</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:white">
+                  <input type="radio" id="seq-specific" name="_seq_choice" value="specific" onchange="onSeqChoice('specific')">
+                  <span><i class="fas fa-bookmark" style="font-size:10px;color:var(--success)"></i> Séance spécifique</span>
+                </label>
+              </div>
+              <!-- Aperçu des séances (mode "toute la séquence") -->
+              <div id="seq-preview"></div>
+              <!-- Sélection séance (mode "séance spécifique") -->
+              <div id="seq-specific-area" style="display:none">
+                <select id="cas-mod" name="module_id" class="form-control">
+                  <option value="">— Choisir une séance —</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -435,7 +477,6 @@ renderTopbar('Cahier de texte', $breadcrumbs);
 </div>
 
 <script>
-// Données RNCP pour cascade (chargées côté PHP)
 const _rncp  = <?= json_encode(array_values($rncpTitles),   JSON_UNESCAPED_UNICODE) ?>;
 const _ats   = <?= json_encode(array_values($actTypes),     JSON_UNESCAPED_UNICODE) ?>;
 const _comps = <?= json_encode(array_values($competencies), JSON_UNESCAPED_UNICODE) ?>;
@@ -445,15 +486,9 @@ const _cohortRncpId = <?= $cohort['rncp_title_id'] ? (int)$cohort['rncp_title_id
 const _defaultDate  = '<?= $defaultDate ?>';
 
 function _fillSel(sel, items, valKey, labelFn) {
-  const placeholder = Array.from(sel.options).slice(0,1)[0];
-  sel.innerHTML = '';
-  sel.appendChild(placeholder);
-  items.forEach(it => {
-    const o = document.createElement('option');
-    o.value = it[valKey];
-    o.textContent = labelFn(it);
-    sel.appendChild(o);
-  });
+  const ph = Array.from(sel.options).slice(0,1)[0];
+  sel.innerHTML = ''; sel.appendChild(ph);
+  items.forEach(it => { const o = document.createElement('option'); o.value = it[valKey]; o.textContent = labelFn(it); sel.appendChild(o); });
   sel.disabled = items.length === 0;
 }
 
@@ -470,16 +505,48 @@ function cascadeComp(atId) {
 function cascadeSeq(compId) {
   const f = compId ? _seqs.filter(s => s.competency_id == compId) : [];
   _fillSel(document.getElementById('cas-seq'), f, 'id', s => s.title);
-  cascadeMod('');
-}
-function cascadeMod(seqId) {
-  const f = seqId ? _mods.filter(m => m.sequence_id == seqId) : [];
-  _fillSel(document.getElementById('cas-mod'), f, 'id', m => m.title);
+  onSeqChange('');
 }
 
-// Remonte la chaîne depuis sequence_id → rncp_title_id
+// Appelé quand la séquence change
+function onSeqChange(seqId) {
+  const area = document.getElementById('seq-choice-area');
+  // Réinitialiser module_id caché si présent
+  const modSel = document.getElementById('cas-mod');
+  if (modSel) modSel.value = '';
+  if (!seqId) { area.style.display = 'none'; return; }
+  area.style.display = 'block';
+  document.getElementById('seq-whole').checked = true;
+  onSeqChoice('whole', seqId);
+}
+
+// Gère le choix séquence entière vs séance spécifique
+function onSeqChoice(choice, seqId) {
+  seqId = seqId || document.getElementById('cas-seq').value;
+  const mods = _mods.filter(m => m.sequence_id == seqId);
+  const preview  = document.getElementById('seq-preview');
+  const specArea = document.getElementById('seq-specific-area');
+  const modSel   = document.getElementById('cas-mod');
+
+  if (choice === 'whole') {
+    specArea.style.display = 'none';
+    if (modSel) modSel.value = '';
+    if (mods.length > 0) {
+      preview.innerHTML = '<div style="border-top:1px solid rgba(99,102,241,.2);margin-top:6px;padding-top:8px">' +
+        mods.map((m,i) => `<div style="font-size:12px;color:var(--text-muted);padding:2px 0;display:flex;gap:6px"><span style="color:var(--primary-light);font-weight:700;flex-shrink:0;min-width:16px">${i+1}.</span><span>${m.title}</span></div>`).join('') +
+        '</div>';
+    } else {
+      preview.innerHTML = '<div style="font-size:12px;color:var(--text-faint);margin-top:6px">Aucune séance dans cette séquence.</div>';
+    }
+  } else {
+    preview.innerHTML = '';
+    specArea.style.display = 'block';
+    _fillSel(modSel, mods, 'id', m => m.title);
+  }
+}
+
 function _rncpFromSeq(seqId) {
-  const seq  = _seqs.find(s => s.id == seqId); if (!seq)  return null;
+  const seq  = _seqs.find(s => s.id == seqId);  if (!seq)  return null;
   const comp = _comps.find(c => c.id == seq.competency_id); if (!comp) return null;
   const at   = _ats.find(a => a.id == comp.activity_type_id); if (!at) return null;
   return { rncp_title_id: at.rncp_title_id, at_id: at.id, comp_id: comp.id };
@@ -490,18 +557,17 @@ function openEntryModal(entry) {
   document.getElementById('modal-entry-title').innerHTML = isEdit
     ? '<i class="fas fa-edit" style="color:var(--primary-light)"></i> Modifier la séance'
     : '<i class="fas fa-plus" style="color:var(--primary-light)"></i> Ajouter une séance';
-  document.getElementById('entry-action').value       = isEdit ? 'edit_entry'  : 'add_entry';
-  document.getElementById('entry-id').value           = isEdit ? entry.id      : '';
+  document.getElementById('entry-action').value       = isEdit ? 'edit_entry' : 'add_entry';
+  document.getElementById('entry-id').value           = isEdit ? entry.id     : '';
   document.getElementById('entry-date').value         = isEdit ? entry.scheduled_date : _defaultDate;
   document.getElementById('entry-time-start').value   = isEdit ? (entry.time_start || '') : '';
   document.getElementById('entry-time-end').value     = isEdit ? (entry.time_end   || '') : '';
-  document.getElementById('entry-title-input').value  = isEdit ? entry.title    : '';
+  document.getElementById('entry-title-input').value  = isEdit ? entry.title   : '';
   document.getElementById('entry-instructions').value = isEdit ? (entry.instructions || '') : '';
   document.getElementById('modal-entry-btn').innerHTML = isEdit
-    ? '<i class="fas fa-save"></i> Mettre à jour'
-    : '<i class="fas fa-save"></i> Enregistrer';
+    ? '<i class="fas fa-save"></i> Mettre à jour' : '<i class="fas fa-save"></i> Enregistrer';
 
-  // Cascade RNCP
+  // Cascade RNCP + choix séquence/séance
   const rncpSel = document.getElementById('cas-rncp');
   if (isEdit && entry.sequence_id) {
     const chain = _rncpFromSeq(entry.sequence_id);
@@ -513,29 +579,24 @@ function openEntryModal(entry) {
       document.getElementById('cas-comp').value = chain.comp_id;
       cascadeSeq(chain.comp_id);
       document.getElementById('cas-seq').value = entry.sequence_id;
+      onSeqChange(entry.sequence_id);
       if (entry.module_id) {
-        cascadeMod(entry.sequence_id);
+        document.getElementById('seq-specific').checked = true;
+        onSeqChoice('specific', entry.sequence_id);
         document.getElementById('cas-mod').value = entry.module_id;
-      } else {
-        cascadeMod(entry.sequence_id);
       }
     }
   } else {
-    // Pré-sélectionner le RNCP de la cohorte si défini
     rncpSel.value = _cohortRncpId || '';
-    if (_cohortRncpId) cascadeAT(_cohortRncpId);
-    else { cascadeAT(''); }
+    if (_cohortRncpId) cascadeAT(_cohortRncpId); else cascadeAT('');
+    document.getElementById('seq-choice-area').style.display = 'none';
   }
 
   document.getElementById('modal-entry').style.display = 'flex';
   setTimeout(() => document.getElementById('entry-title-input').focus(), 60);
 }
 
-function closeEntryModal() {
-  document.getElementById('modal-entry').style.display = 'none';
-}
-document.getElementById('modal-entry').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal-entry')) closeEntryModal();
-});
+function closeEntryModal() { document.getElementById('modal-entry').style.display = 'none'; }
+document.getElementById('modal-entry').addEventListener('click', e => { if (e.target === document.getElementById('modal-entry')) closeEntryModal(); });
 </script>
 <?php renderFooter(); ?>

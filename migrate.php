@@ -81,6 +81,19 @@ $migrations = [
         ALTER TABLE `cohort_members`
         ADD COLUMN IF NOT EXISTS `excluded_from_stats` TINYINT(1) NOT NULL DEFAULT 0
     ",
+    '013_agenda_cohort_nullable' => "
+        ALTER TABLE `agenda_entries`
+        MODIFY COLUMN `cohort_id` INT UNSIGNED DEFAULT NULL
+    ",
+    '013_agenda_student_id' => "
+        ALTER TABLE `agenda_entries`
+        ADD COLUMN IF NOT EXISTS `student_id` INT UNSIGNED DEFAULT NULL AFTER `cohort_id`
+    ",
+    '013_agenda_student_fk' => "
+        ALTER TABLE `agenda_entries`
+        ADD CONSTRAINT `fk_agenda_student_id` FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+        ADD INDEX `idx_agenda_student_date` (`student_id`, `scheduled_date`)
+    ",
     '012_create_agenda_entries' => "
         CREATE TABLE IF NOT EXISTS `agenda_entries` (
           `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -157,7 +170,9 @@ foreach ($migrations as $name => $sql) {
         // "Duplicate column" = déjà appliqué, c'est OK
         $msg = $e->getMessage();
         $alreadyDone = strpos($msg, 'Duplicate column') !== false
-                    || strpos($msg, 'already exists') !== false;
+                    || strpos($msg, 'already exists') !== false
+                    || strpos($msg, 'Duplicate key name') !== false
+                    || strpos($msg, 'Duplicate foreign key') !== false;
         $results[] = [
             'status' => $alreadyDone ? 'skip' : 'error',
             'name'   => $name,

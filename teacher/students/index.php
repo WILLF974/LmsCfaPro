@@ -143,14 +143,15 @@ renderTopbar('Mes filleuls', [['Enseignant', url('teacher/index.php')], ['Mes fi
         <?php endif; ?>
 
         <!-- Actions -->
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
           <a href="<?= url('admin/users/progress.php?id='.$s['id']) ?>" class="btn btn-primary btn-sm" style="flex:1;justify-content:center">
             <i class="fas fa-chart-line"></i> Suivi pédagogique
           </a>
-          <div style="font-size:10px;color:var(--text-faint);display:flex;align-items:center;white-space:nowrap">
-            Tutorat depuis <?= formatDate($s['assigned_at']) ?>
-          </div>
+          <a href="<?= url('student/cahier/index.php?id='.$s['id']) ?>" class="btn btn-secondary btn-sm" title="Cahier de texte personnel">
+            <i class="fas fa-book-open"></i>
+          </a>
         </div>
+        <div style="font-size:10px;color:var(--text-faint)">Tutorat depuis <?= formatDate($s['assigned_at']) ?></div>
 
       </div>
     </div>

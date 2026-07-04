@@ -121,7 +121,7 @@ function renderSidebar(string $role): void {
     <a href="<?= url('teacher/students/index.php') ?>" class="nav-link <?= currentUrlContains('/students') ? 'active' : '' ?>">
       <i class="fas fa-user-graduate"></i> Mes étudiants
     </a>
-    <a href="<?= url('teacher/cahier/index.php') ?>" class="nav-link <?= (currentUrlContains('/teacher/cahier') || currentUrlContains('/cohorts/agenda')) ? 'active' : '' ?>">
+    <a href="<?= url('teacher/cahier/index.php') ?>" class="nav-link <?= (currentUrlContains('/teacher/cahier') || currentUrlContains('/cohorts/agenda') || currentUrlContains('/student/cahier')) ? 'active' : '' ?>">
       <i class="fas fa-book-open"></i> Cahier de texte
     </a>
     <a href="<?= url('teacher/evaluations/index.php') ?>" class="nav-link <?= currentUrlContains('/evaluations') ? 'active' : '' ?>">
@@ -132,6 +132,9 @@ function renderSidebar(string $role): void {
     <div class="nav-section-title">Apprenant</div>
     <a href="<?= url('student/index.php') ?>" class="nav-link <?= currentUrlContains('/student/index') ? 'active' : '' ?>">
       <i class="fas fa-home"></i> Mon espace
+    </a>
+    <a href="<?= url('student/cahier/index.php') ?>" class="nav-link <?= currentUrlContains('/student/cahier') ? 'active' : '' ?>">
+      <i class="fas fa-book-open"></i> Cahier de texte
     </a>
     <a href="<?= url('student/formations/index.php') ?>" class="nav-link <?= currentUrlContains('/student/formations') ? 'active' : '' ?>">
       <i class="fas fa-graduation-cap"></i> Mes formations
