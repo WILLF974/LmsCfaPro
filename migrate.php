@@ -190,6 +190,26 @@ $migrations = [
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ",
 
+    // ── Migration 015 : Accès par périmètre pédagogique ────────────────────────
+    '015_create_access_grants' => "
+        CREATE TABLE IF NOT EXISTS `access_grants` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT UNSIGNED NOT NULL,
+          `scope_type` ENUM('rncp_title','activity_type','competency','sequence','module') NOT NULL,
+          `scope_id` INT UNSIGNED NOT NULL,
+          `granted_by` INT UNSIGNED DEFAULT NULL,
+          `granted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `revoked_at` DATETIME DEFAULT NULL,
+          `revoked_by` INT UNSIGNED DEFAULT NULL,
+          `notes` VARCHAR(255) DEFAULT NULL,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`granted_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`revoked_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          UNIQUE KEY `unique_grant` (`user_id`, `scope_type`, `scope_id`),
+          INDEX `idx_user_active` (`user_id`, `revoked_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
     '004_create_case_study_submissions' => "
         CREATE TABLE IF NOT EXISTS `case_study_submissions` (
           `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

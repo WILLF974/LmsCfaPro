@@ -16,14 +16,11 @@ if (!$cs) { setFlash('error', 'Étude de cas introuvable.'); redirect(url('stude
 
 $userId = (int)$_SESSION['user_id'];
 
-// Accès : enseignant/admin toujours autorisé ; étudiant vérifié si lié à une formation
-if (!isTeacher() && !isAdmin() && !isPedagogy()) {
-    if ($cs['formation_id']) {
-        $enrolled = $pdo->prepare('SELECT 1 FROM enrollments WHERE user_id=? AND formation_id=? AND status="active"');
-        $enrolled->execute([$userId, $cs['formation_id']]);
-        if (!$enrolled->fetch()) {
-            setFlash('error', 'Accès non autorisé.'); redirect(url('student/index.php'));
-        }
+// Accès : enseignant/admin toujours autorisé ; étudiant vérifié via enrollment ou access_grant
+if (isStudent()) {
+    $scope = ['formation_id' => (int)($cs['formation_id'] ?? 0)];
+    if (!hasContentAccess($userId, $scope)) {
+        setFlash('error', 'Accès non autorisé.'); redirect(url('student/index.php'));
     }
 }
 

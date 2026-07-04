@@ -245,6 +245,72 @@ function createNotification(int $userId, string $title, string $message, string 
 }
 
 /**
+ * Contrôle d'accès unifié : enrollment OU access_grant
+ * $scope peut contenir formation_id, module_id, sequence_id, competency_id, activity_type_id, rncp_title_id
+ */
+function hasContentAccess(int $userId, array $scope): bool {
+    $pdo = getDB();
+
+    $formationId    = (int)($scope['formation_id']    ?? 0);
+    $moduleId       = (int)($scope['module_id']       ?? 0);
+    $sequenceId     = (int)($scope['sequence_id']     ?? 0);
+    $competencyId   = (int)($scope['competency_id']   ?? 0);
+    $activityTypeId = (int)($scope['activity_type_id'] ?? 0);
+    $rncpTitleId    = (int)($scope['rncp_title_id']   ?? 0);
+
+    // 1. Inscription formation (mécanisme existant, prioritaire)
+    if ($formationId) {
+        $e = $pdo->prepare("SELECT id FROM enrollments WHERE user_id=? AND formation_id=? AND status IN ('active','completed') LIMIT 1");
+        $e->execute([$userId, $formationId]);
+        if ($e->fetch()) return true;
+    }
+
+    // 2. Résolution de l'ascendance depuis module_id
+    if ($moduleId && (!$sequenceId || !$competencyId || !$activityTypeId || !$rncpTitleId)) {
+        try {
+            $r = $pdo->prepare("
+                SELECT m.sequence_id,
+                       COALESCE(s.competency_id, m.competency_id) AS comp_id,
+                       COALESCE(c.activity_type_id, m.activity_type_id) AS at_id,
+                       at.rncp_title_id
+                FROM modules m
+                LEFT JOIN sequences    s  ON m.sequence_id = s.id
+                LEFT JOIN competencies c  ON COALESCE(s.competency_id, m.competency_id) = c.id
+                LEFT JOIN activity_types at ON COALESCE(c.activity_type_id, m.activity_type_id) = at.id
+                WHERE m.id = ?
+            ");
+            $r->execute([$moduleId]);
+            if ($row = $r->fetch()) {
+                $sequenceId     = $sequenceId     ?: (int)$row['sequence_id'];
+                $competencyId   = $competencyId   ?: (int)$row['comp_id'];
+                $activityTypeId = $activityTypeId ?: (int)$row['at_id'];
+                $rncpTitleId    = $rncpTitleId    ?: (int)$row['rncp_title_id'];
+            }
+        } catch (\Exception $e) { /* modules.sequence_id inexistant : ignore */ }
+    }
+
+    // 3. Vérification access_grants (du plus précis au plus large)
+    $pairs = [];
+    if ($moduleId)       $pairs[] = ['module',        $moduleId];
+    if ($sequenceId)     $pairs[] = ['sequence',       $sequenceId];
+    if ($competencyId)   $pairs[] = ['competency',     $competencyId];
+    if ($activityTypeId) $pairs[] = ['activity_type',  $activityTypeId];
+    if ($rncpTitleId)    $pairs[] = ['rncp_title',     $rncpTitleId];
+
+    if (empty($pairs)) return false;
+
+    try {
+        foreach ($pairs as [$type, $id]) {
+            $g = $pdo->prepare("SELECT id FROM access_grants WHERE user_id=? AND scope_type=? AND scope_id=? AND revoked_at IS NULL LIMIT 1");
+            $g->execute([$userId, $type, $id]);
+            if ($g->fetch()) return true;
+        }
+    } catch (\Exception $e) { /* table pas encore créée */ }
+
+    return false;
+}
+
+/**
  * Audit log
  */
 function auditLog(string $action, string $entityType = '', int $entityId = 0, array $oldValues = [], array $newValues = []): void {

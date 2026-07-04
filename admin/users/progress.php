@@ -509,6 +509,7 @@ if ($viewerRole === 'teacher') {
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap">
         <?php if ($viewerRole !== 'teacher'): ?>
+        <a href="<?= url('admin/users/access.php?id='.$userId) ?>" class="btn btn-secondary btn-sm" style="color:#a78bfa"><i class="fas fa-key"></i> Accès</a>
         <a href="<?= url('admin/users/edit.php?id='.$userId) ?>" class="btn btn-secondary btn-sm"><i class="fas fa-edit"></i> Modifier</a>
         <?php if (!empty($enrollments)): ?>
         <button type="button" class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3)"

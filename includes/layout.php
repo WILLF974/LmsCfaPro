@@ -97,8 +97,11 @@ function renderSidebar(string $role): void {
     <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= (currentUrlContains('/courses/index') || currentUrlContains('/courses/seance_create')) ? 'active' : '' ?>">
       <i class="fas fa-bookmark"></i> Séances
     </a>
-    <a href="<?= url('admin/users/index.php?role=student') ?>" class="nav-link <?= currentUrlContains('/admin/users') ? 'active' : '' ?>">
+    <a href="<?= url('admin/users/index.php?role=student') ?>" class="nav-link <?= (currentUrlContains('/admin/users') && !currentUrlContains('/admin/users/access')) ? 'active' : '' ?>">
       <i class="fas fa-users"></i> Apprenants
+    </a>
+    <a href="<?= url('pedagogy/access/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/access') ? 'active' : '' ?>">
+      <i class="fas fa-key"></i> Accès ressources
     </a>
     <a href="<?= url('pedagogy/cohorts/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/cohorts') ? 'active' : '' ?>">
       <i class="fas fa-layer-group"></i> Cohortes

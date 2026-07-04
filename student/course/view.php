@@ -23,12 +23,10 @@ $formationId = $formationId ?: $lesson['fid'];
 $isPreview   = !empty($_GET['preview']) && !isStudent();
 $previewParam = $isPreview ? '&preview=1' : '';
 
-// Check enrollment
-if (isStudent()) {
-    $enrolled = $pdo->prepare("SELECT id FROM enrollments WHERE user_id=? AND formation_id=? AND status IN ('active','completed')");
-    $enrolled->execute([$userId, $formationId]);
-    if (!$enrolled->fetch() && !$lesson['is_preview']) {
-        setFlash('error','Vous n\'êtes pas inscrit à cette formation.');
+// Check enrollment ou access_grant
+if (isStudent() && !$lesson['is_preview']) {
+    if (!hasContentAccess($userId, ['formation_id' => $formationId])) {
+        setFlash('error', 'Vous n\'êtes pas inscrit à cette formation.');
         redirect(url('student/index.php'));
     }
 }
