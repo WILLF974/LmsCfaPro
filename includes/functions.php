@@ -349,6 +349,11 @@ function sanitizeInput(mixed $value): string {
     return trim(htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'));
 }
 
+function sanitizeRichHtml(string $html): string {
+    $allowed = '<p><br><b><strong><i><em><u><ul><ol><li><h1><h2><h3><h4><h5><a><blockquote><hr><img><span><div>';
+    return strip_tags($html, $allowed);
+}
+
 function validateEmail(string $email): bool {
     return (bool)filter_var($email, FILTER_VALIDATE_EMAIL);
 }
