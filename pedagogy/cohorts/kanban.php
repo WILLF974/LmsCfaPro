@@ -186,7 +186,7 @@ $colMeta = [
     'graded'      => ['label'=>'Corrigé',  'color'=>'var(--success)',      'icon'=>'fa-check-circle', 'bg'=>'rgba(52,211,153,.08)'],
 ];
 
-$csrfToken = $_SESSION['csrf_token'] ?? '';
+$csrfToken = $_SESSION[CSRF_TOKEN_NAME] ?? '';
 
 renderHead('Kanban — ' . $cohort['name']);
 renderSidebar($sidebarRole);
@@ -245,11 +245,11 @@ renderTopbar('Kanban', $breadcrumbs);
         <!-- Toggle vue -->
         <div class="kview-toggle">
           <button class="kview-btn <?= $view === 'task' ? 'active' : '' ?>"
-                  onclick="switchView('task')">
+                  onclick="switchView('task',this)">
             <i class="fas fa-tasks"></i> Tâches
           </button>
           <button class="kview-btn <?= $view === 'student' ? 'active' : '' ?>"
-                  onclick="switchView('student')">
+                  onclick="switchView('student',this)">
             <i class="fas fa-users"></i> Apprenants
           </button>
         </div>
@@ -486,10 +486,10 @@ renderTopbar('Kanban', $breadcrumbs);
 
 <?php
 // JSON des hiérarchies pour la cascade JS
-$kAt   = json_encode($actTypes,   JSON_HEX_TAG|JSON_HEX_APOS);
-$kComp = json_encode($competencies, JSON_HEX_TAG|JSON_HEX_APOS);
-$kSeq  = json_encode($sequences,  JSON_HEX_TAG|JSON_HEX_APOS);
-$kMod  = json_encode($allModules, JSON_HEX_TAG|JSON_HEX_APOS);
+$kAt   = json_encode($actTypes,     JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
+$kComp = json_encode($competencies, JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
+$kSeq  = json_encode($sequences,    JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
+$kMod  = json_encode($allModules,   JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
 ?>
 <script>
 const CSRF = <?= json_encode($csrfToken) ?>;
@@ -595,11 +595,11 @@ async function deleteCard(cardId, boardId, e) {
 }
 
 // ── Toggle vue ───────────────────────────────────────────────
-function switchView(v) {
+function switchView(v, btn) {
     document.getElementById('view-task').style.display    = v === 'task'    ? '' : 'none';
     document.getElementById('view-student').style.display = v === 'student' ? '' : 'none';
     document.querySelectorAll('.kview-btn').forEach(b => b.classList.remove('active'));
-    event.currentTarget.classList.add('active');
+    if (btn) btn.classList.add('active');
     history.replaceState(null, '', '?id=<?= $cohortId ?>&view=' + v);
 }
 
@@ -621,15 +621,19 @@ async function submitAddCard(e) {
 
     const btn = e.target.querySelector('[type=submit]');
     btn.disabled = true;
-    const res  = await fetch('', {method:'POST', body:form});
-    const data = await res.json();
-    btn.disabled = false;
-
-    if (data.ok) {
-        closeAddModal();
-        location.reload(); // simple refresh pour afficher la nouvelle carte
-    } else {
-        alert(data.msg || 'Erreur lors de l\'ajout.');
+    try {
+        const res  = await fetch(location.pathname + location.search, {method:'POST', body:form});
+        const data = await res.json();
+        if (data.ok) {
+            closeAddModal();
+            location.reload();
+        } else {
+            alert(data.msg || 'Erreur lors de l\'ajout.');
+        }
+    } catch (err) {
+        alert('Erreur réseau. Veuillez réessayer.');
+    } finally {
+        btn.disabled = false;
     }
 }
 

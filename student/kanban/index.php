@@ -163,7 +163,7 @@ $colMeta = [
     'graded'      => ['label'=>'Corrigé',  'color'=>'var(--success)',      'icon'=>'fa-check-circle',  'bg'=>'rgba(52,211,153,.08)'],
 ];
 
-$csrfToken = $_SESSION['csrf_token'] ?? '';
+$csrfToken = $_SESSION[CSRF_TOKEN_NAME] ?? '';
 
 $pageTitle = $isOwnView ? 'Mon Kanban' : 'Kanban — '.$student['first_name'].' '.$student['last_name'];
 renderHead($pageTitle);
@@ -371,10 +371,10 @@ renderTopbar($pageTitle, $breadcrumbs);
 </div>
 
 <?php
-$kAt   = json_encode($actTypes,     JSON_HEX_TAG|JSON_HEX_APOS);
-$kComp = json_encode($competencies, JSON_HEX_TAG|JSON_HEX_APOS);
-$kSeq  = json_encode($sequences,    JSON_HEX_TAG|JSON_HEX_APOS);
-$kMod  = json_encode($allModules,   JSON_HEX_TAG|JSON_HEX_APOS);
+$kAt   = json_encode($actTypes,     JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
+$kComp = json_encode($competencies, JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
+$kSeq  = json_encode($sequences,    JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
+$kMod  = json_encode($allModules,   JSON_HEX_TAG|JSON_HEX_APOS) ?: '[]';
 ?>
 <script>
 const CSRF = <?= json_encode($csrfToken) ?>;
@@ -404,7 +404,7 @@ async function dropCard(e, newStatus) {
     form.append('csrf_token', CSRF);
     form.append('ajax', '1');
 
-    const res  = await fetch('', {method:'POST', body:form});
+    const res  = await fetch(location.pathname + location.search, {method:'POST', body:form});
     const data = await res.json();
     if (data.ok) {
         const card = document.querySelector(`[data-card-id="${dragged}"]`);
@@ -433,7 +433,7 @@ async function deleteCard(cardId, e) {
     form.append('csrf_token', CSRF);
     form.append('ajax', '1');
 
-    const res  = await fetch('', {method:'POST', body:form});
+    const res  = await fetch(location.pathname + location.search, {method:'POST', body:form});
     const data = await res.json();
     if (data.ok) {
         const card = document.querySelector(`[data-card-id="${cardId}"]`);
@@ -458,11 +458,16 @@ async function submitAddCard(e) {
     form.append('ajax', '1');
     const btn = e.target.querySelector('[type=submit]');
     btn.disabled = true;
-    const res  = await fetch('', {method:'POST', body:form});
-    const data = await res.json();
-    btn.disabled = false;
-    if (data.ok) { closeAddModal(); location.reload(); }
-    else alert(data.msg || 'Erreur.');
+    try {
+        const res  = await fetch(location.pathname + location.search, {method:'POST', body:form});
+        const data = await res.json();
+        if (data.ok) { closeAddModal(); location.reload(); }
+        else alert(data.msg || 'Erreur lors de l\'ajout.');
+    } catch (err) {
+        alert('Erreur réseau. Veuillez réessayer.');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 // ── Cascade RNCP ─────────────────────────────────────────────
