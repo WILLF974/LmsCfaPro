@@ -772,7 +772,7 @@ function toggleHelp() {
 }
 
 // ── Type de contenu ──────────────────────────────────────────
-var editData = <?= $isEdit ? json_encode(['type'=>$seance['content_type'],'url'=>$seance['content_url'],'body'=>sanitizeRichHtml($seance['content_body'])]) : 'null' ?>;
+var editData = <?= $isEdit ? (json_encode(['type'=>$seance['content_type'],'url'=>$seance['content_url'],'body'=>sanitizeRichHtml($seance['content_body'])], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null') : 'null' ?>;
 const typeCards = document.querySelectorAll('.type-card');
 
 typeCards.forEach(card => {
