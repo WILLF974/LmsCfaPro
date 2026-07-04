@@ -265,28 +265,34 @@ function hasContentAccess(int $userId, array $scope): bool {
         if ($e->fetch()) return true;
     }
 
-    // 2. Résolution de l'ascendance depuis module_id
-    if ($moduleId && (!$sequenceId || !$competencyId || !$activityTypeId || !$rncpTitleId)) {
+    // 2. Résolution de l'ascendance depuis module_id (requêtes séquentielles simples)
+    if ($moduleId && !$sequenceId) {
         try {
-            $r = $pdo->prepare("
-                SELECT m.sequence_id,
-                       COALESCE(s.competency_id, m.competency_id) AS comp_id,
-                       COALESCE(c.activity_type_id, m.activity_type_id) AS at_id,
-                       at.rncp_title_id
-                FROM modules m
-                LEFT JOIN sequences    s  ON m.sequence_id = s.id
-                LEFT JOIN competencies c  ON COALESCE(s.competency_id, m.competency_id) = c.id
-                LEFT JOIN activity_types at ON COALESCE(c.activity_type_id, m.activity_type_id) = at.id
-                WHERE m.id = ?
-            ");
+            $r = $pdo->prepare("SELECT sequence_id FROM modules WHERE id=?");
             $r->execute([$moduleId]);
-            if ($row = $r->fetch()) {
-                $sequenceId     = $sequenceId     ?: (int)$row['sequence_id'];
-                $competencyId   = $competencyId   ?: (int)$row['comp_id'];
-                $activityTypeId = $activityTypeId ?: (int)$row['at_id'];
-                $rncpTitleId    = $rncpTitleId    ?: (int)$row['rncp_title_id'];
-            }
-        } catch (\Exception $e) { /* modules.sequence_id inexistant : ignore */ }
+            $sequenceId = (int)$r->fetchColumn() ?: $sequenceId;
+        } catch (\Exception $e) {}
+    }
+    if ($sequenceId && !$competencyId) {
+        try {
+            $r = $pdo->prepare("SELECT competency_id FROM sequences WHERE id=?");
+            $r->execute([$sequenceId]);
+            $competencyId = (int)$r->fetchColumn() ?: $competencyId;
+        } catch (\Exception $e) {}
+    }
+    if ($competencyId && !$activityTypeId) {
+        try {
+            $r = $pdo->prepare("SELECT activity_type_id FROM competencies WHERE id=?");
+            $r->execute([$competencyId]);
+            $activityTypeId = (int)$r->fetchColumn() ?: $activityTypeId;
+        } catch (\Exception $e) {}
+    }
+    if ($activityTypeId && !$rncpTitleId) {
+        try {
+            $r = $pdo->prepare("SELECT rncp_title_id FROM activity_types WHERE id=?");
+            $r->execute([$activityTypeId]);
+            $rncpTitleId = (int)$r->fetchColumn() ?: $rncpTitleId;
+        } catch (\Exception $e) {}
     }
 
     // 3. Vérification access_grants (du plus précis au plus large)

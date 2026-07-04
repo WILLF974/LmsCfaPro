@@ -10,31 +10,43 @@ $moduleId = (int)($_GET['id'] ?? 0);
 if (!$moduleId) { setFlash('error', 'Séance introuvable.'); redirect(url('student/index.php')); }
 
 // ── Charger la séance (module) ────────────────────────────────────────────────
-$stmt = $pdo->prepare("
-    SELECT m.*,
-           seq.id AS seq_id, seq.title AS seq_title,
-           c.code AS comp_code, c.title AS comp_title,
-           at.code AS at_code, at.title AS at_title,
-           rt.rncp_code
-    FROM modules m
-    LEFT JOIN sequences    seq ON m.sequence_id = seq.id
-    LEFT JOIN competencies c   ON seq.competency_id = c.id
-    LEFT JOIN activity_types at ON c.activity_type_id = at.id
-    LEFT JOIN rncp_titles  rt  ON at.rncp_title_id = rt.id
-    WHERE m.id = ?
-");
-$stmt->execute([$moduleId]);
-$seance = $stmt->fetch();
+$seance = null;
+try {
+    $stmt = $pdo->prepare("
+        SELECT m.*,
+               seq.id AS seq_id, seq.title AS seq_title,
+               c.id AS comp_id, c.code AS comp_code, c.title AS comp_title,
+               at.id AS at_id, at.code AS at_code, at.title AS at_title,
+               rt.id AS rncp_id, rt.rncp_code
+        FROM modules m
+        LEFT JOIN sequences      seq ON m.sequence_id   = seq.id
+        LEFT JOIN competencies   c   ON seq.competency_id  = c.id
+        LEFT JOIN activity_types at  ON c.activity_type_id = at.id
+        LEFT JOIN rncp_titles    rt  ON at.rncp_title_id   = rt.id
+        WHERE m.id = ?
+    ");
+    $stmt->execute([$moduleId]);
+    $seance = $stmt->fetch();
+} catch (\Exception $e) {
+    // Fallback : query sans les joins (si sequence_id absent de modules)
+    try {
+        $stmt2 = $pdo->prepare("SELECT * FROM modules WHERE id=?");
+        $stmt2->execute([$moduleId]);
+        $seance = $stmt2->fetch();
+    } catch (\Exception $e2) {}
+}
 if (!$seance) { setFlash('error', 'Séance introuvable.'); redirect(url('student/index.php')); }
 
 // ── Contrôle d'accès ──────────────────────────────────────────────────────────
 $isPreview = !empty($_GET['preview']) && !isStudent();
 if (isStudent() && !($seance['is_preview'] ?? false)) {
     $scope = [
-        'formation_id'    => (int)($seance['formation_id']    ?? 0),
+        'formation_id'    => (int)($seance['formation_id'] ?? 0),
         'module_id'       => $moduleId,
-        'competency_id'   => (int)($seance['competency_id']   ?? 0),
-        'activity_type_id'=> (int)($seance['activity_type_id'] ?? 0),
+        'sequence_id'     => (int)($seance['seq_id']       ?? 0),
+        'competency_id'   => (int)($seance['comp_id']      ?? 0),
+        'activity_type_id'=> (int)($seance['at_id']        ?? 0),
+        'rncp_title_id'   => (int)($seance['rncp_id']      ?? 0),
     ];
     if (!hasContentAccess($userId, $scope)) {
         setFlash('error', 'Vous n\'avez pas accès à cette séance.');
