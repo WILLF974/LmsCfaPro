@@ -109,8 +109,8 @@ function renderSidebar(string $role): void {
     <a href="<?= url('teacher/index.php') ?>" class="nav-link <?= currentUrlContains('/teacher/index') ? 'active' : '' ?>">
       <i class="fas fa-home"></i> Tableau de bord
     </a>
-    <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= currentUrlContains('/courses') ? 'active' : '' ?>">
-      <i class="fas fa-list-ol"></i> Séances / Séquences
+    <a href="<?= url('teacher/courses/sequences.php') ?>" class="nav-link <?= currentUrlContains('/courses/sequences') ? 'active' : '' ?>">
+      <i class="fas fa-list-ol"></i> Séquences & Séances
     </a>
     <a href="<?= url('teacher/quizzes/index.php') ?>" class="nav-link <?= currentUrlContains('/quizzes') ? 'active' : '' ?>">
       <i class="fas fa-question-circle"></i> Quiz & Éval
