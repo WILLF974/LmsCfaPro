@@ -260,6 +260,7 @@ renderTopbar($pageTitle, [
                 <?php endif; ?>
                 <?php if ($u['role'] === 'student'): ?>
                 <a href="<?= url('admin/users/progress.php?id='.$u['id']) ?>" class="btn btn-ghost btn-sm" title="Suivi pédagogique" style="color:var(--primary-light)"><i class="fas fa-chart-line"></i></a>
+                <a href="<?= url('student/cahier/index.php?id='.$u['id']) ?>" class="btn btn-ghost btn-sm" title="Cahier de texte" style="color:var(--text-muted)"><i class="fas fa-book-open"></i></a>
                 <?php if (!empty($teachers)): ?>
                 <button class="btn btn-ghost btn-sm" title="<?= $u['tutor_name'] ? 'Changer / révoquer le tuteur' : 'Assigner un tuteur' ?>"
                   style="color:<?= $u['tutor_name'] ? '#a78bfa' : 'var(--text-muted)' ?>"
