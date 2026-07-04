@@ -605,14 +605,22 @@ function switchView(v, btn) {
 
 // ── Modal Nouvelle tâche ─────────────────────────────────────
 function openAddModal() {
-    document.getElementById('add-modal').style.display = 'flex';
+    const m = document.getElementById('add-modal');
+    m.style.display = '';
+    m.classList.add('open');
+    document.body.style.overflow = 'hidden';
     document.getElementById('add-card-form').reset();
     document.getElementById('k-at').disabled   = true;
     document.getElementById('k-comp').disabled = true;
     document.getElementById('k-seq').disabled  = true;
     document.getElementById('k-mod-group').style.display = 'none';
 }
-function closeAddModal() { document.getElementById('add-modal').style.display = 'none'; }
+function closeAddModal() {
+    const m = document.getElementById('add-modal');
+    m.classList.remove('open');
+    m.style.display = 'none';
+    document.body.style.overflow = '';
+}
 
 async function submitAddCard(e) {
     e.preventDefault();
