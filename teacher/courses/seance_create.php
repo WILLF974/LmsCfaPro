@@ -637,7 +637,14 @@ renderTopbar($pageTitle, [
 </div>
 
 <!-- ── JS Cascade + UI ─────────────────────────────────────────────────────── -->
+<div id="js-error-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#ef4444;color:#fff;padding:12px 16px;font-size:13px;font-weight:600;word-break:break-all"></div>
 <script>
+window.onerror = function(msg, src, line, col, err) {
+  var b = document.getElementById('js-error-banner');
+  b.textContent = 'Erreur JS [' + (src||'').split('/').pop() + ':' + line + '] ' + msg;
+  b.style.display = 'block';
+  return false;
+};
 var SEANCES_PER_SEQ = <?= json_encode($seancesPerSeq, JSON_UNESCAPED_UNICODE) ?>;
 
 (function() {
@@ -944,13 +951,14 @@ if (editData) {
   if (editData.url) { const u = document.getElementById('content-url'); if (u) u.value = editData.url; }
   if (editData.body && editor) { editor.innerHTML = editData.body; hidden.value = editData.body; }
 } else {
-  updateContentZone('video');
+  updateContentZone('<?= e($curType) ?>');
 }
 
 function execFormat(cmd) {
-  if (cmd === 'list-ul') document.execCommand('insertUnorderedList');
-  else if (cmd === 'list-ol') document.execCommand('insertOrderedList');
-  else document.execCommand(cmd); editor.focus();
+  if (cmd === 'list-ul') { document.execCommand('insertUnorderedList'); }
+  else if (cmd === 'list-ol') { document.execCommand('insertOrderedList'); }
+  else { document.execCommand(cmd); }
+  if (editor) editor.focus();
 }
 
 function makeDrop(dropzone, input, onFiles) {
