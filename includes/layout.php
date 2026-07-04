@@ -97,6 +97,9 @@ function renderSidebar(string $role): void {
     <a href="<?= url('admin/users/index.php?role=student') ?>" class="nav-link <?= currentUrlContains('/admin/users') ? 'active' : '' ?>">
       <i class="fas fa-users"></i> Apprenants
     </a>
+    <a href="<?= url('pedagogy/cohorts/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/cohorts') ? 'active' : '' ?>">
+      <i class="fas fa-layer-group"></i> Cohortes
+    </a>
     <a href="<?= url('admin/reports/index.php') ?>" class="nav-link">
       <i class="fas fa-chart-bar"></i> Rapports
     </a>
@@ -117,6 +120,9 @@ function renderSidebar(string $role): void {
     </a>
     <a href="<?= url('teacher/students/index.php') ?>" class="nav-link <?= currentUrlContains('/students') ? 'active' : '' ?>">
       <i class="fas fa-user-graduate"></i> Mes étudiants
+    </a>
+    <a href="<?= url('teacher/cahier/index.php') ?>" class="nav-link <?= (currentUrlContains('/teacher/cahier') || currentUrlContains('/cohorts/agenda')) ? 'active' : '' ?>">
+      <i class="fas fa-book-open"></i> Cahier de texte
     </a>
     <a href="<?= url('teacher/evaluations/index.php') ?>" class="nav-link <?= currentUrlContains('/evaluations') ? 'active' : '' ?>">
       <i class="fas fa-tasks"></i> Corrections

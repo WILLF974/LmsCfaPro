@@ -1,17 +1,38 @@
 <?php
 require_once dirname(dirname(__DIR__)) . '/config/config.php';
 require_once dirname(dirname(__DIR__)) . '/includes/layout.php';
-requirePedagogy();
+
+// Contrôle d'accès : admin/pédagogie toujours, enseignant uniquement s'il est le tuteur
+$viewer = currentUser();
+if (!$viewer) { redirect(url('index.php')); }
 
 $pdo    = getDB();
 $userId = (int)($_GET['id'] ?? 0);
 if (!$userId) { setFlash('error', 'Utilisateur introuvable.'); redirect(url('admin/users/index.php')); }
 
+$viewerRole = $viewer['role'];
+if (!in_array($viewerRole, ['admin', 'pedagogy'])) {
+    if ($viewerRole === 'teacher') {
+        try {
+            $tc = $pdo->prepare("SELECT id FROM tutor_assignments WHERE teacher_id=? AND student_id=? AND revoked_at IS NULL LIMIT 1");
+            $tc->execute([$viewer['id'], $userId]);
+            if (!$tc->fetch()) {
+                setFlash('error', "Vous n'êtes pas le tuteur de cet apprenant.");
+                redirect(url('teacher/students/index.php'));
+            }
+        } catch (Exception $e) {
+            redirect(url('teacher/index.php'));
+        }
+    } else {
+        redirect(url('index.php'));
+    }
+}
+
 // Charger l'étudiant
 $userStmt = $pdo->prepare('SELECT * FROM users WHERE id = ?');
 $userStmt->execute([$userId]);
 $student = $userStmt->fetch();
-if (!$student) { setFlash('error', 'Utilisateur introuvable.'); redirect(url('admin/users/index.php')); }
+if (!$student) { setFlash('error', 'Utilisateur introuvable.'); redirect(url($viewerRole === 'teacher' ? 'teacher/students/index.php' : 'admin/users/index.php')); }
 
 // ── Actions POST ─────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -345,16 +366,125 @@ foreach ($enrollments as $enr) {
     } catch (Exception $e) { $formationsData[$fId]['rncpTree'] = []; }
 }
 
+// ── Fallback : arborescence sans inscription (depuis module_progress) ──
+$freeProgress = [];
+if (empty($enrollments)) {
+    try {
+        $freeModStmt = $pdo->prepare("
+            SELECT m.id, m.title, m.content_type, m.duration_hours, m.xp_reward, m.is_mandatory,
+                   m.sequence_id, m.order_num,
+                   mp.status as prog_status, mp.started_at, mp.completed_at, mp.time_spent_seconds,
+                   seq.id as seq_id, seq.title as seq_title, seq.order_num as seq_order,
+                   c.id as comp_id, c.code as comp_code, c.title as comp_title, c.order_num as comp_order,
+                   at.id as at_id, at.code as at_code, at.title as at_title, at.order_num as at_order,
+                   rt.id as rncp_id, rt.rncp_code, rt.title as rncp_title
+            FROM module_progress mp
+            JOIN modules m ON mp.module_id = m.id
+            LEFT JOIN sequences seq ON m.sequence_id = seq.id
+            LEFT JOIN competencies c ON seq.competency_id = c.id
+            LEFT JOIN activity_types at ON c.activity_type_id = at.id
+            LEFT JOIN rncp_titles rt ON at.rncp_title_id = rt.id
+            WHERE mp.user_id = ?
+            ORDER BY at.order_num, c.order_num, seq.order_num, m.order_num
+        ");
+        $freeModStmt->execute([$userId]);
+
+        $freeQzStmt = $pdo->prepare("
+            SELECT q.id as qid, q.title as qtitle, q.passing_score, q.xp_reward,
+                   q.module_id, q.competency_id,
+                   qa.started_at, qa.completed_at, qa.time_spent_seconds,
+                   qa.score, qa.passed, qa.teacher_score, qa.review_status
+            FROM quiz_attempts qa
+            JOIN quizzes q ON qa.quiz_id = q.id
+            WHERE qa.user_id = ?
+              AND qa.id = (SELECT MAX(qa2.id) FROM quiz_attempts qa2
+                           WHERE qa2.quiz_id = q.id AND qa2.user_id = ? AND qa2.status = 'completed')
+        ");
+        $freeQzStmt->execute([$userId, $userId]);
+        $freeQzByMod = []; $freeQzByComp = [];
+        foreach ($freeQzStmt->fetchAll() as $qz) {
+            if ($qz['module_id'])         $freeQzByMod[$qz['module_id']][]       = $qz;
+            elseif ($qz['competency_id']) $freeQzByComp[$qz['competency_id']][]  = $qz;
+        }
+
+        $freeCsByComp = [];
+        try {
+            $freeCsStmt = $pdo->prepare("
+                SELECT cs.id as cs_id, cs.title as cs_title, cs.competency_id,
+                       css.submitted_at, css.graded_at, css.score, css.max_score, css.status, css.grade
+                FROM case_study_submissions css
+                JOIN case_studies cs ON css.case_study_id = cs.id
+                WHERE css.user_id = ?
+            ");
+            $freeCsStmt->execute([$userId]);
+            foreach ($freeCsStmt->fetchAll() as $cs) {
+                if ($cs['competency_id']) $freeCsByComp[$cs['competency_id']][] = $cs;
+            }
+        } catch (Exception $e) {}
+
+        foreach ($freeModStmt->fetchAll() as $row) {
+            $rId  = $row['rncp_id']  ?? 0;
+            $atId = $row['at_id']    ?? 0;
+            $cId  = $row['comp_id']  ?? 0;
+            $sId  = $row['seq_id']   ?? 0;
+            $mId  = $row['id'];
+            if (!isset($freeProgress[$rId])) {
+                $freeProgress[$rId] = ['code'=>$row['rncp_code'],'title'=>$row['rncp_title'],'ats'=>[]];
+            }
+            if (!isset($freeProgress[$rId]['ats'][$atId])) {
+                $freeProgress[$rId]['ats'][$atId] = ['code'=>$row['at_code'],'title'=>$row['at_title'],'order'=>(int)$row['at_order'],'comps'=>[]];
+            }
+            if (!isset($freeProgress[$rId]['ats'][$atId]['comps'][$cId])) {
+                $freeProgress[$rId]['ats'][$atId]['comps'][$cId] = [
+                    'code'=>$row['comp_code'],'title'=>$row['comp_title'],'order'=>(int)$row['comp_order'],
+                    'seqs'=>[],'quizzes'=>$freeQzByComp[$cId]??[],'case_studies'=>$freeCsByComp[$cId]??[],
+                ];
+            }
+            if ($sId && !isset($freeProgress[$rId]['ats'][$atId]['comps'][$cId]['seqs'][$sId])) {
+                $freeProgress[$rId]['ats'][$atId]['comps'][$cId]['seqs'][$sId] = [
+                    'id'=>$sId,'title'=>$row['seq_title'],'order'=>(int)$row['seq_order'],'modules'=>[],
+                ];
+            }
+            $modEntry = [
+                'id'=>$mId,'title'=>$row['title'],'content_type'=>$row['content_type'],
+                'duration_hours'=>$row['duration_hours'],'xp_reward'=>$row['xp_reward'],
+                'is_mandatory'=>$row['is_mandatory'],'order_num'=>$row['order_num'],
+                'prog_status'=>$row['prog_status'],'started_at'=>$row['started_at'],
+                'completed_at'=>$row['completed_at'],'time_spent_seconds'=>$row['time_spent_seconds'],
+                'quizzes'=>$freeQzByMod[$mId]??[],
+            ];
+            if ($sId) {
+                $freeProgress[$rId]['ats'][$atId]['comps'][$cId]['seqs'][$sId]['modules'][] = $modEntry;
+            }
+        }
+    } catch (Exception $e) {}
+}
+
 // ── Render ───────────────────────────────────────────────────
 $name = e($student['first_name'] . ' ' . $student['last_name']);
 renderHead('Suivi pédagogique — ' . $name);
-$viewerRole = currentUser()['role'] ?? 'admin';
-renderSidebar($viewerRole === 'pedagogy' ? 'pedagogy' : 'admin');
-renderTopbar('Suivi pédagogique', [
-    [$viewerRole === 'pedagogy' ? 'Pédagogie' : 'Administration', url($viewerRole === 'pedagogy' ? 'pedagogy/index.php' : 'admin/index.php')],
-    ['Apprenants', url('admin/users/index.php')],
-    [$name, ''],
-]);
+if ($viewerRole === 'teacher') {
+    renderSidebar('teacher');
+    renderTopbar('Suivi pédagogique', [
+        ['Enseignant', url('teacher/index.php')],
+        ['Mes filleuls', url('teacher/students/index.php')],
+        [$name, ''],
+    ]);
+} elseif ($viewerRole === 'pedagogy') {
+    renderSidebar('pedagogy');
+    renderTopbar('Suivi pédagogique', [
+        ['Pédagogie', url('pedagogy/index.php')],
+        ['Apprenants', url('admin/users/index.php')],
+        [$name, ''],
+    ]);
+} else {
+    renderSidebar('admin');
+    renderTopbar('Suivi pédagogique', [
+        ['Administration', url('admin/index.php')],
+        ['Apprenants', url('admin/users/index.php')],
+        [$name, ''],
+    ]);
+}
 ?>
 <div class="page-content fade-in">
 
@@ -378,6 +508,7 @@ renderTopbar('Suivi pédagogique', [
         <div style="font-size:13px;color:var(--text-muted)"><?= e($student['email']) ?><?= $student['phone'] ? ' · '.e($student['phone']) : '' ?></div>
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap">
+        <?php if ($viewerRole !== 'teacher'): ?>
         <a href="<?= url('admin/users/edit.php?id='.$userId) ?>" class="btn btn-secondary btn-sm"><i class="fas fa-edit"></i> Modifier</a>
         <?php if (!empty($enrollments)): ?>
         <button type="button" class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3)"
@@ -385,7 +516,8 @@ renderTopbar('Suivi pédagogique', [
           <i class="fas fa-redo"></i> Réinitialiser tout
         </button>
         <?php endif; ?>
-        <a href="<?= url('admin/users/index.php') ?>" class="btn btn-ghost btn-sm"><i class="fas fa-arrow-left"></i> Retour</a>
+        <?php endif; ?>
+        <a href="<?= url($viewerRole === 'teacher' ? 'teacher/students/index.php' : 'admin/users/index.php') ?>" class="btn btn-ghost btn-sm"><i class="fas fa-arrow-left"></i> Retour</a>
       </div>
     </div>
   </div>
@@ -414,11 +546,227 @@ renderTopbar('Suivi pédagogique', [
     <?php endforeach; ?>
   </div>
 
-  <?php if (empty($enrollments)): ?>
+  <?php if (empty($enrollments) && empty($freeProgress)): ?>
   <div class="empty-state">
     <div class="icon">📚</div>
     <h3>Aucune inscription</h3>
-    <p>Cet étudiant n'est inscrit à aucune formation.</p>
+    <p>Cet étudiant n'est inscrit à aucune formation et n'a aucune progression enregistrée.</p>
+  </div>
+  <?php endif; ?>
+
+  <!-- ═══ ARBORESCENCE RNCP (sans inscription formelle) ═══ -->
+  <?php if (!empty($freeProgress)): $fpId = 'fp'; ?>
+  <div class="card" style="margin-bottom:28px">
+    <div class="card-header" style="background:rgba(99,102,241,.07);padding:16px 20px">
+      <div style="font-size:17px;font-weight:800;color:white"><i class="fas fa-sitemap" style="margin-right:8px"></i>Progression RNCP</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Séances consultées (accès hors inscription formation)</div>
+    </div>
+    <div style="padding:20px">
+    <?php foreach ($freeProgress as $rId => $rncp):
+      $rTotal=0; $rDone=0;
+      foreach ($rncp['ats'] as $at2) foreach ($at2['comps'] as $c2) foreach ($c2['seqs'] as $s2) foreach ($s2['modules'] as $m2) { $rTotal++; if ($m2['prog_status']==='completed') $rDone++; }
+      $rPct = $rTotal>0?round($rDone/$rTotal*100):0;
+    ?>
+    <div style="margin-bottom:14px;border:1px solid rgba(99,102,241,.3);border-radius:var(--radius-lg);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:rgba(99,102,241,.12);cursor:pointer" onclick="toggleSection('rncp-<?=$fpId?>-<?=$rId?>')">
+        <i class="fas fa-graduation-cap" style="color:var(--primary-light);font-size:15px;flex-shrink:0"></i>
+        <div style="flex:1;min-width:0">
+          <?php if ($rncp['code']): ?><span class="badge badge-primary" style="font-size:10px;margin-bottom:4px"><?= e($rncp['code']) ?></span> <?php endif; ?>
+          <span style="font-size:14px;font-weight:800;color:white"><?= e($rncp['title'] ?? 'Titre RNCP') ?></span>
+        </div>
+        <div style="flex-shrink:0;display:flex;align-items:center;gap:10px">
+          <?php if ($rTotal>0): ?>
+          <div style="text-align:right">
+            <div style="font-size:15px;font-weight:800;color:<?= $rPct===100?'var(--success)':'var(--primary-light)' ?>"><?= $rPct ?>%</div>
+            <div style="font-size:10px;color:var(--text-faint)"><?= $rDone ?>/<?= $rTotal ?> séances</div>
+          </div>
+          <?php endif; ?>
+          <i class="fas fa-chevron-down" id="chev-rncp-<?=$fpId?>-<?=$rId?>" style="color:var(--text-muted);transition:.2s"></i>
+        </div>
+      </div>
+      <div id="rncp-<?=$fpId?>-<?=$rId?>">
+        <?php foreach ($rncp['ats'] as $atId => $at):
+          $atTotal=0; $atDone=0;
+          foreach ($at['comps'] as $c2) foreach ($c2['seqs'] as $s2) foreach ($s2['modules'] as $m2) { $atTotal++; if ($m2['prog_status']==='completed') $atDone++; }
+          $atPct = $atTotal>0?round($atDone/$atTotal*100):0;
+        ?>
+        <div style="border-top:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 18px 12px 30px;background:rgba(139,92,246,.07);cursor:pointer" onclick="toggleSection('at-<?=$fpId?>-<?=$atId?>')">
+            <i class="fas fa-layer-group" style="color:#a78bfa;font-size:13px;flex-shrink:0"></i>
+            <div style="flex:1;min-width:0">
+              <?php if ($at['code']): ?><span class="badge badge-secondary" style="font-size:10px"><?= e($at['code']) ?></span> <?php endif; ?>
+              <span style="font-size:13px;font-weight:700;color:white"><?= e($at['title'] ?? 'Activité Type') ?></span>
+            </div>
+            <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
+              <?php if ($atTotal>0): ?>
+              <span style="font-size:13px;font-weight:700;color:<?= $atPct===100?'var(--success)':'#a78bfa' ?>"><?= $atPct ?>%</span>
+              <span style="font-size:10px;color:var(--text-faint)"><?= $atDone ?>/<?= $atTotal ?></span>
+              <?php endif; ?>
+              <i class="fas fa-chevron-down" id="chev-at-<?=$fpId?>-<?=$atId?>" style="color:var(--text-muted);transition:.2s"></i>
+            </div>
+          </div>
+          <div id="at-<?=$fpId?>-<?=$atId?>">
+            <?php foreach ($at['comps'] as $cId => $comp):
+              $cTotal=0; $cDone=0;
+              foreach ($comp['seqs'] as $s2) foreach ($s2['modules'] as $m2) { $cTotal++; if ($m2['prog_status']==='completed') $cDone++; }
+              $cPct = $cTotal>0?round($cDone/$cTotal*100):0;
+            ?>
+            <div style="border-top:1px solid rgba(255,255,255,.04)">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 18px 10px 44px;background:rgba(59,130,246,.04);cursor:pointer" onclick="toggleSection('comp-<?=$fpId?>-<?=$cId?>')">
+                <i class="fas fa-bullseye" style="color:#60a5fa;font-size:12px;flex-shrink:0"></i>
+                <div style="flex:1;min-width:0">
+                  <?php if ($comp['code']): ?><span style="font-size:10px;padding:1px 6px;background:rgba(59,130,246,.15);border-radius:99px;color:#60a5fa;border:1px solid rgba(59,130,246,.3)"><?= e($comp['code']) ?></span> <?php endif; ?>
+                  <span style="font-size:13px;font-weight:600;color:white"><?= e($comp['title'] ?? 'Compétence') ?></span>
+                </div>
+                <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
+                  <?php if ($cTotal>0): ?>
+                  <span style="font-size:12px;font-weight:700;color:<?= $cPct===100?'var(--success)':'#60a5fa' ?>"><?= $cPct ?>%</span>
+                  <span style="font-size:10px;color:var(--text-faint)"><?= $cDone ?>/<?= $cTotal ?></span>
+                  <?php endif; ?>
+                  <i class="fas fa-chevron-down" id="chev-comp-<?=$fpId?>-<?=$cId?>" style="color:var(--text-muted);transition:.2s;transform:rotate(-90deg)"></i>
+                </div>
+              </div>
+              <div id="comp-<?=$fpId?>-<?=$cId?>" style="display:none">
+                <?php foreach ($comp['seqs'] as $sId => $seq):
+                  $sTotal2 = count($seq['modules']);
+                  $sDone2  = count(array_filter($seq['modules'], fn($m) => $m['prog_status']==='completed'));
+                  $sPct2   = $sTotal2>0?round($sDone2/$sTotal2*100):0;
+                ?>
+                <div style="border-top:1px solid rgba(255,255,255,.03)">
+                  <div style="display:flex;align-items:center;gap:10px;padding:9px 18px 9px 56px;background:var(--bg-elevated);cursor:pointer" onclick="toggleSection('cseq-<?=$fpId?>-<?=$sId?>')">
+                    <i class="fas fa-stream" style="color:var(--text-faint);font-size:11px;flex-shrink:0"></i>
+                    <span style="flex:1;font-size:12px;font-weight:600;color:var(--text-muted)"><?= e($seq['title']) ?></span>
+                    <div style="flex-shrink:0;display:flex;align-items:center;gap:6px">
+                      <?php if ($sTotal2>0): ?>
+                      <span style="font-size:11px;font-weight:700;color:<?= $sPct2===100?'var(--success)':'var(--text-muted)' ?>"><?= $sPct2 ?>%</span>
+                      <span style="font-size:10px;color:var(--text-faint)"><?= $sDone2 ?>/<?= $sTotal2 ?></span>
+                      <?php endif; ?>
+                      <i class="fas fa-chevron-down" id="chev-cseq-<?=$fpId?>-<?=$sId?>" style="color:var(--text-faint);font-size:10px;transition:.2s;transform:rotate(-90deg)"></i>
+                    </div>
+                  </div>
+                  <div id="cseq-<?=$fpId?>-<?=$sId?>" style="display:none">
+                    <?php if (!empty($seq['modules'])): ?>
+                    <div style="overflow-x:auto;border-top:1px solid rgba(255,255,255,.03)">
+                      <table style="width:100%;border-collapse:collapse;font-size:12px">
+                        <thead>
+                          <tr style="background:var(--bg-surface)">
+                            <th style="padding:6px 12px 6px 68px;text-align:left;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase">Séance / Évaluation</th>
+                            <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Statut</th>
+                            <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Début</th>
+                            <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Fin</th>
+                            <th style="padding:6px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;white-space:nowrap">Durée</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <?php foreach ($seq['modules'] as $m):
+                            $mst = $m['prog_status'] ?? 'not_started';
+                          ?>
+                          <tr style="border-top:1px solid rgba(255,255,255,.03);background:<?= $mst==='completed'?'rgba(16,185,129,.03)':($mst==='in_progress'?'rgba(99,102,241,.03)':'') ?>">
+                            <td style="padding:8px 12px 8px 68px">
+                              <div style="display:flex;align-items:center;gap:8px">
+                                <i class="<?= getContentTypeIcon($m['content_type']) ?>" style="color:var(--text-faint);font-size:11px;width:12px;flex-shrink:0"></i>
+                                <span style="color:<?= $mst==='completed'?'var(--text-muted)':'var(--text)' ?>"><?= e($m['title']) ?></span>
+                                <?php if (!$m['is_mandatory']): ?><span class="badge badge-secondary" style="font-size:9px">Opt.</span><?php endif; ?>
+                              </div>
+                            </td>
+                            <td style="padding:8px 12px;text-align:center">
+                              <?php if ($mst==='completed'): ?><span class="badge badge-success" style="font-size:10px"><i class="fas fa-check"></i> Validée</span>
+                              <?php elseif ($mst==='in_progress'): ?><span class="badge badge-primary" style="font-size:10px"><i class="fas fa-play"></i> En cours</span>
+                              <?php else: ?><span class="badge badge-secondary" style="font-size:10px">À faire</span><?php endif; ?>
+                            </td>
+                            <td style="padding:8px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= $m['started_at'] ? formatDateTime($m['started_at']) : '—' ?></td>
+                            <td style="padding:8px 12px;text-align:center;color:<?= $m['completed_at']?'var(--success)':'var(--text-muted)' ?>;white-space:nowrap;font-size:11px"><?= $m['completed_at'] ? formatDateTime($m['completed_at']) : '—' ?></td>
+                            <td style="padding:8px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= fmtSeconds((int)($m['time_spent_seconds'] ?? 0)) ?></td>
+                          </tr>
+                          <?php foreach ($m['quizzes'] as $qz):
+                            $qPassed = (bool)$qz['passed'];
+                            $qScore  = $qz['teacher_score'] ?? $qz['score'];
+                          ?>
+                          <tr style="border-top:1px solid rgba(255,255,255,.02);background:rgba(251,191,36,.04)">
+                            <td style="padding:7px 12px 7px 80px">
+                              <div style="display:flex;align-items:center;gap:8px">
+                                <i class="fas fa-question-circle" style="color:var(--warning);font-size:11px;flex-shrink:0"></i>
+                                <span style="color:var(--text-muted);font-style:italic"><?= e($qz['qtitle']) ?></span>
+                                <?php if ($qPassed): ?><i class="fas fa-trophy" style="color:var(--warning);font-size:10px"></i><?php endif; ?>
+                              </div>
+                            </td>
+                            <td style="padding:7px 12px;text-align:center">
+                              <?php if (!$qz['started_at']): ?><span class="badge badge-secondary" style="font-size:10px">Non démarré</span>
+                              <?php elseif ($qPassed): ?><span class="badge badge-success" style="font-size:10px">Réussi<?= $qScore!==null?' — '.round($qScore).'%':'' ?></span>
+                              <?php elseif ($qz['review_status']==='returned'): ?><span class="badge badge-warning" style="font-size:10px">Retourné</span>
+                              <?php elseif ($qz['completed_at']): ?><span class="badge badge-danger" style="font-size:10px">Échoué<?= $qScore!==null?' — '.round($qScore).'%':'' ?></span>
+                              <?php else: ?><span class="badge badge-primary" style="font-size:10px">En cours</span><?php endif; ?>
+                            </td>
+                            <td style="padding:7px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= $qz['started_at'] ? formatDateTime($qz['started_at']) : '—' ?></td>
+                            <td style="padding:7px 12px;text-align:center;color:<?= $qz['completed_at']?($qPassed?'var(--success)':'var(--danger)'):'var(--text-muted)' ?>;white-space:nowrap;font-size:11px"><?= $qz['completed_at'] ? formatDateTime($qz['completed_at']) : '—' ?></td>
+                            <td style="padding:7px 12px;text-align:center;color:var(--text-muted);white-space:nowrap;font-size:11px"><?= fmtSeconds((int)($qz['time_spent_seconds'] ?? 0)) ?></td>
+                          </tr>
+                          <?php endforeach; ?>
+                          <?php endforeach; ?>
+                        </tbody>
+                      </table>
+                    </div>
+                    <?php else: ?>
+                    <div style="padding:10px 14px 10px 68px;color:var(--text-faint);font-size:12px;border-top:1px solid rgba(255,255,255,.03)">Aucune séance dans cette séquence.</div>
+                    <?php endif; ?>
+                  </div>
+                </div>
+                <?php endforeach; ?>
+                <?php foreach ($comp['quizzes'] as $qz):
+                  $qPassed2 = (bool)$qz['passed'];
+                  $qScore2  = $qz['teacher_score'] ?? $qz['score'];
+                ?>
+                <div style="border-top:1px solid rgba(255,255,255,.03);padding:9px 18px 9px 56px;display:flex;align-items:center;gap:10px;background:rgba(251,191,36,.03)">
+                  <i class="fas fa-question-circle" style="color:var(--warning);font-size:12px;flex-shrink:0"></i>
+                  <div style="flex:1;min-width:0">
+                    <span style="font-size:12px;font-weight:600;color:var(--text-muted)"><?= e($qz['qtitle']) ?></span>
+                    <?php if ($qz['started_at']): ?>
+                    <div style="font-size:10px;color:var(--text-faint);margin-top:2px;display:flex;gap:12px;flex-wrap:wrap">
+                      <span>Début : <?= formatDateTime($qz['started_at']) ?></span>
+                      <?php if ($qz['completed_at']): ?><span>Fin : <?= formatDateTime($qz['completed_at']) ?></span><?php endif; ?>
+                      <?php if ($qz['time_spent_seconds']): ?><span>Durée : <?= fmtSeconds((int)$qz['time_spent_seconds']) ?></span><?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+                  </div>
+                  <div style="flex-shrink:0">
+                    <?php if (!$qz['started_at']): ?><span class="badge badge-secondary" style="font-size:10px">Non démarré</span>
+                    <?php elseif ($qPassed2): ?><span class="badge badge-success" style="font-size:10px"><i class="fas fa-trophy"></i> <?= $qScore2!==null?round($qScore2).'%':'' ?></span>
+                    <?php elseif ($qz['review_status']==='returned'): ?><span class="badge badge-warning" style="font-size:10px">Retourné</span>
+                    <?php elseif ($qz['completed_at']): ?><span class="badge badge-danger" style="font-size:10px"><?= $qScore2!==null?round($qScore2).'%':'Échoué' ?></span>
+                    <?php else: ?><span class="badge badge-primary" style="font-size:10px">En cours</span><?php endif; ?>
+                  </div>
+                </div>
+                <?php endforeach; ?>
+                <?php foreach ($comp['case_studies'] as $cs): $csStatus = $cs['status'] ?? 'pending'; ?>
+                <div style="border-top:1px solid rgba(255,255,255,.03);padding:9px 18px 9px 56px;display:flex;align-items:center;gap:10px;background:rgba(16,185,129,.02)">
+                  <i class="fas fa-file-alt" style="color:var(--success);font-size:12px;flex-shrink:0"></i>
+                  <div style="flex:1;min-width:0">
+                    <span style="font-size:12px;font-weight:600;color:var(--text-muted)"><?= e($cs['cs_title']) ?></span>
+                    <?php if ($cs['submitted_at']): ?>
+                    <div style="font-size:10px;color:var(--text-faint);margin-top:2px;display:flex;gap:12px;flex-wrap:wrap">
+                      <span>Soumis : <?= formatDateTime($cs['submitted_at']) ?></span>
+                      <?php if ($cs['graded_at']): ?><span>Corrigé : <?= formatDateTime($cs['graded_at']) ?></span><?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+                  </div>
+                  <div style="flex-shrink:0">
+                    <?php if ($csStatus==='graded'): ?><span class="badge badge-success" style="font-size:10px"><?= $cs['score']!==null?$cs['score'].'/'.$cs['max_score']:'Corrigé' ?></span>
+                    <?php elseif ($csStatus==='submitted'): ?><span class="badge badge-primary" style="font-size:10px">Soumis</span>
+                    <?php elseif ($csStatus==='returned'): ?><span class="badge badge-warning" style="font-size:10px">Retourné</span>
+                    <?php else: ?><span class="badge badge-secondary" style="font-size:10px">Non soumis</span><?php endif; ?>
+                  </div>
+                </div>
+                <?php endforeach; ?>
+              </div>
+            </div>
+            <?php endforeach; ?>
+          </div>
+        </div>
+        <?php endforeach; ?>
+      </div>
+    </div><!-- /rncp block -->
+    <?php endforeach; ?>
+    </div>
   </div>
   <?php endif; ?>
 
