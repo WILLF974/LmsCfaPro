@@ -87,9 +87,14 @@ renderTopbar('Cahier de texte', [['Cahier de texte', '']]);
         </div>
         <?php endif; ?>
 
-        <a href="<?= url('pedagogy/cohorts/agenda.php?id='.$c['id']) ?>" class="btn btn-primary btn-sm" style="width:100%;justify-content:center">
-          <i class="fas fa-book-open"></i> Ouvrir le cahier de texte
-        </a>
+        <div style="display:flex;gap:8px">
+          <a href="<?= url('pedagogy/cohorts/agenda.php?id='.$c['id']) ?>" class="btn btn-primary btn-sm" style="flex:1;justify-content:center">
+            <i class="fas fa-book-open"></i> Cahier
+          </a>
+          <a href="<?= url('pedagogy/cohorts/kanban.php?id='.$c['id']) ?>" class="btn btn-secondary btn-sm" style="flex:1;justify-content:center">
+            <i class="fas fa-columns"></i> Kanban
+          </a>
+        </div>
       </div>
     </div>
     <?php endforeach; ?>

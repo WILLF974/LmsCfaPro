@@ -124,6 +124,9 @@ function renderSidebar(string $role): void {
     <a href="<?= url('teacher/cahier/index.php') ?>" class="nav-link <?= (currentUrlContains('/teacher/cahier') || currentUrlContains('/cohorts/agenda') || currentUrlContains('/student/cahier')) ? 'active' : '' ?>">
       <i class="fas fa-book-open"></i> Cahier de texte
     </a>
+    <a href="<?= url('student/kanban/index.php') ?>" class="nav-link <?= currentUrlContains('/kanban') ? 'active' : '' ?>">
+      <i class="fas fa-columns"></i> Kanban
+    </a>
     <a href="<?= url('teacher/evaluations/index.php') ?>" class="nav-link <?= currentUrlContains('/evaluations') ? 'active' : '' ?>">
       <i class="fas fa-tasks"></i> Corrections
     </a>
@@ -135,6 +138,9 @@ function renderSidebar(string $role): void {
     </a>
     <a href="<?= url('student/cahier/index.php') ?>" class="nav-link <?= currentUrlContains('/student/cahier') ? 'active' : '' ?>">
       <i class="fas fa-book-open"></i> Cahier de texte
+    </a>
+    <a href="<?= url('student/kanban/index.php') ?>" class="nav-link <?= currentUrlContains('/student/kanban') ? 'active' : '' ?>">
+      <i class="fas fa-columns"></i> Kanban
     </a>
     <a href="<?= url('student/formations/index.php') ?>" class="nav-link <?= currentUrlContains('/student/formations') ? 'active' : '' ?>">
       <i class="fas fa-graduation-cap"></i> Mes formations

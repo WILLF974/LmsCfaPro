@@ -167,6 +167,7 @@ renderTopbar('Cohorte', [
             <i class="fas fa-user-plus"></i> Ajouter
           </button>
           <a href="<?= url('pedagogy/cohorts/agenda.php?id='.$cohortId) ?>" class="btn btn-secondary btn-sm"><i class="fas fa-book-open"></i> Cahier de texte</a>
+          <a href="<?= url('pedagogy/cohorts/kanban.php?id='.$cohortId) ?>" class="btn btn-secondary btn-sm"><i class="fas fa-columns"></i> Kanban</a>
           <a href="<?= url('pedagogy/cohorts/create.php?id='.$cohortId) ?>" class="btn btn-ghost btn-sm"><i class="fas fa-edit"></i> Modifier</a>
           <a href="<?= url('pedagogy/cohorts/index.php') ?>" class="btn btn-ghost btn-sm"><i class="fas fa-arrow-left"></i> Retour</a>
         </div>

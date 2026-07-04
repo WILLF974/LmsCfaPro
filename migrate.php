@@ -47,6 +47,58 @@ $migrations = [
         ALTER TABLE `quiz_attempts`
         ADD COLUMN IF NOT EXISTS `graded_at` DATETIME DEFAULT NULL
     ",
+    // ── Migration 014 : Kanban ───────────────────────────────────────────────
+    '014_create_kanban_boards' => "
+        CREATE TABLE IF NOT EXISTS `kanban_boards` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `cohort_id` INT UNSIGNED DEFAULT NULL,
+          `student_id` INT UNSIGNED DEFAULT NULL,
+          `created_by` INT UNSIGNED NOT NULL,
+          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY `unique_cohort_board` (`cohort_id`),
+          UNIQUE KEY `unique_student_board` (`student_id`),
+          FOREIGN KEY (`cohort_id`) REFERENCES `cohorts`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
+          INDEX `idx_kb_student` (`student_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    '014_create_kanban_cards' => "
+        CREATE TABLE IF NOT EXISTS `kanban_cards` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `board_id` INT UNSIGNED NOT NULL,
+          `title` VARCHAR(255) NOT NULL,
+          `description` TEXT DEFAULT NULL,
+          `due_date` DATE DEFAULT NULL,
+          `sequence_id` INT UNSIGNED DEFAULT NULL,
+          `module_id` INT UNSIGNED DEFAULT NULL,
+          `status` ENUM('todo','in_progress','submitted','graded') NOT NULL DEFAULT 'todo',
+          `position` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+          `created_by` INT UNSIGNED NOT NULL,
+          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`board_id`) REFERENCES `kanban_boards`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`sequence_id`) REFERENCES `sequences`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`module_id`) REFERENCES `modules`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
+          INDEX `idx_kc_board_status` (`board_id`, `status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    '014_create_kanban_member_status' => "
+        CREATE TABLE IF NOT EXISTS `kanban_member_status` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `board_id` INT UNSIGNED NOT NULL,
+          `student_id` INT UNSIGNED NOT NULL,
+          `status` ENUM('todo','in_progress','submitted','graded') NOT NULL DEFAULT 'todo',
+          `updated_by` INT UNSIGNED DEFAULT NULL,
+          `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY `unique_member_status` (`board_id`, `student_id`),
+          FOREIGN KEY (`board_id`) REFERENCES `kanban_boards`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`updated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          INDEX `idx_kms_student` (`student_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
     // ── Migration 010 : Cohortes ─────────────────────────────────────────────
     '010_create_cohorts' => "
         CREATE TABLE IF NOT EXISTS `cohorts` (
