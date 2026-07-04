@@ -94,6 +94,9 @@ function renderSidebar(string $role): void {
     <a href="<?= url('pedagogy/sequences/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/sequences') ? 'active' : '' ?>">
       <i class="fas fa-list-ol"></i> Séquences
     </a>
+    <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= (currentUrlContains('/courses/index') || currentUrlContains('/courses/seance_create')) ? 'active' : '' ?>">
+      <i class="fas fa-bookmark"></i> Séances
+    </a>
     <a href="<?= url('admin/users/index.php?role=student') ?>" class="nav-link <?= currentUrlContains('/admin/users') ? 'active' : '' ?>">
       <i class="fas fa-users"></i> Apprenants
     </a>
@@ -110,7 +113,10 @@ function renderSidebar(string $role): void {
       <i class="fas fa-home"></i> Tableau de bord
     </a>
     <a href="<?= url('teacher/courses/sequences.php') ?>" class="nav-link <?= currentUrlContains('/courses/sequences') ? 'active' : '' ?>">
-      <i class="fas fa-list-ol"></i> Séquences & Séances
+      <i class="fas fa-list-ol"></i> Séquences
+    </a>
+    <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= (currentUrlContains('/courses/index') || currentUrlContains('/courses/seance_create')) ? 'active' : '' ?>">
+      <i class="fas fa-bookmark"></i> Séances
     </a>
     <a href="<?= url('teacher/quizzes/index.php') ?>" class="nav-link <?= currentUrlContains('/quizzes') ? 'active' : '' ?>">
       <i class="fas fa-question-circle"></i> Quiz & Éval
