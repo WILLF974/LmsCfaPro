@@ -5,6 +5,17 @@ requirePedagogy();
 
 $pdo = getDB();
 
+// ── Toggle publication ────────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
+    $action = $_POST['action'] ?? '';
+    $seqId  = (int)($_POST['seq_id'] ?? 0);
+    if ($action === 'toggle_publish' && $seqId) {
+        $pdo->prepare("UPDATE sequences SET is_published = 1 - is_published WHERE id = ?")->execute([$seqId]);
+    }
+    redirect(url('pedagogy/sequences/index.php'));
+}
+
 // ── Filtres ───────────────────────────────────────────────────────────────────
 $rncpId  = (int)($_GET['rncp_id']  ?? 0);
 $atId    = (int)($_GET['at_id']    ?? 0);
@@ -21,7 +32,7 @@ if ($search) { $where[] = 'seq.title LIKE ?'; $params[] = '%' . $search . '%'; }
 
 $sequences = $pdo->prepare("
     SELECT seq.id, seq.title, seq.description, seq.order_num, seq.created_by,
-           seq.competency_id, seq.formation_id,
+           seq.competency_id, seq.formation_id, seq.is_published,
            c.code AS comp_code, c.title AS comp_title,
            at.id AS at_id, at.code AS at_code, at.title AS at_title,
            rt.id AS rncp_id, rt.rncp_code, rt.title AS rncp_title,
@@ -210,7 +221,7 @@ renderTopbar('Séquences pédagogiques', [
         </thead>
         <tbody>
         <?php foreach ($sequences as $s): ?>
-        <tr style="border-bottom:1px solid var(--border-color)">
+        <tr style="border-bottom:1px solid var(--border-color);<?= !$s['is_published'] ? 'opacity:.45' : '' ?>;transition:opacity .2s">
           <td style="padding:12px 16px;color:var(--text-muted);font-size:12px"><?= $s['order_num'] ?></td>
           <td style="padding:12px 16px">
             <div style="font-weight:600;color:var(--text-primary)"><?= e($s['title']) ?></div>
@@ -255,6 +266,14 @@ renderTopbar('Séquences pédagogiques', [
             <?php endif; ?>
           </td>
           <td style="padding:12px 16px;text-align:right;white-space:nowrap">
+            <form method="POST" style="display:inline" title="<?= $s['is_published'] ? 'Publié — masquer aux apprenants' : 'Masqué — rendre visible' ?>">
+              <?= csrfField() ?>
+              <input type="hidden" name="action" value="toggle_publish">
+              <input type="hidden" name="seq_id" value="<?= $s['id'] ?>">
+              <button type="submit" class="btn btn-ghost btn-sm" style="margin-right:4px;color:<?= $s['is_published'] ? '#10b981' : 'var(--text-muted)' ?>" title="<?= $s['is_published'] ? 'Publié' : 'Masqué' ?>">
+                <i class="fas <?= $s['is_published'] ? 'fa-eye' : 'fa-eye-slash' ?>"></i>
+              </button>
+            </form>
             <a href="<?= url('pedagogy/sequences/create.php?id='.$s['id']) ?>" class="btn btn-ghost btn-sm" title="Modifier" style="margin-right:4px">
               <i class="fas fa-edit"></i>
             </a>

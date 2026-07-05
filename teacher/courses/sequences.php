@@ -12,6 +12,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     $seqId  = (int)($_POST['seq_id'] ?? 0);
 
+    if ($action === 'seq_toggle_publish' && $seqId) {
+        $pdo->prepare("UPDATE sequences SET is_published = 1 - is_published WHERE id = ?")->execute([$seqId]);
+    }
+
     if (in_array($action, ['seq_up', 'seq_down']) && $seqId) {
         $row = $pdo->prepare("SELECT id, competency_id, order_num FROM sequences WHERE id = ?");
         $row->execute([$seqId]);
@@ -42,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // ── Données ───────────────────────────────────────────────────────────────────
 $seqs = $pdo->query("
-    SELECT s.id, s.title, s.order_num, s.competency_id,
+    SELECT s.id, s.title, s.order_num, s.competency_id, s.is_published,
            c.code AS comp_code, c.title AS comp_title,
            at.id AS at_id, at.code AS at_code, at.title AS at_title,
            rt.id AS rncp_id, rt.rncp_code, rt.title AS rncp_title,
@@ -139,7 +143,7 @@ renderTopbar('Séquences', [['Enseignant', url('teacher/index.php')], ['Séquenc
             $isNew   = $seq['id'] === $highlight;
           ?>
           <div id="seq-<?= $seq['id'] ?>"
-               style="display:flex;align-items:center;gap:10px;padding:10px 14px;<?= $si > 0 ? 'border-top:1px solid var(--border-faint,rgba(255,255,255,.05))' : '' ?>;<?= $isNew ? 'background:rgba(16,185,129,.07)' : '' ?>;transition:background .2s"
+               style="display:flex;align-items:center;gap:10px;padding:10px 14px;<?= $si > 0 ? 'border-top:1px solid var(--border-faint,rgba(255,255,255,.05))' : '' ?>;<?= $isNew ? 'background:rgba(16,185,129,.07)' : '' ?>;<?= !$seq['is_published'] ? 'opacity:.45' : '' ?>;transition:background .2s,opacity .2s"
                class="seq-row">
 
             <!-- Numéro -->
@@ -182,6 +186,14 @@ renderTopbar('Séquences', [['Enseignant', url('teacher/index.php')], ['Séquenc
 
             <!-- Actions -->
             <div style="display:flex;gap:4px;flex-shrink:0">
+              <form method="POST" style="margin:0" title="<?= $seq['is_published'] ? 'Publié — masquer aux apprenants' : 'Masqué — rendre visible' ?>">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="seq_toggle_publish">
+                <input type="hidden" name="seq_id" value="<?= $seq['id'] ?>">
+                <button type="submit" class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px;color:<?= $seq['is_published'] ? '#10b981' : 'var(--text-muted)' ?>">
+                  <i class="fas <?= $seq['is_published'] ? 'fa-eye' : 'fa-eye-slash' ?>"></i>
+                </button>
+              </form>
               <a href="<?= url('teacher/courses/seance_create.php?seq_id=' . $seq['id']) ?>"
                  class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px;color:var(--primary-light)" title="Ajouter une séance">
                 <i class="fas fa-plus"></i>

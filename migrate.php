@@ -191,6 +191,9 @@ $migrations = [
     ",
 
     // ── Migration 015 : Accès par périmètre pédagogique ────────────────────────
+    '016_add_is_published_seq' => "ALTER TABLE sequences ADD COLUMN IF NOT EXISTS is_published TINYINT(1) NOT NULL DEFAULT 1",
+    '016_add_is_published_mod' => "ALTER TABLE modules ADD COLUMN IF NOT EXISTS is_published TINYINT(1) NOT NULL DEFAULT 1",
+
     '015_create_access_grants' => "
         CREATE TABLE IF NOT EXISTS `access_grants` (
           `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

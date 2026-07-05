@@ -25,6 +25,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $moduleId = (int)($_POST['module_id'] ?? 0);
     $seqId    = (int)($_POST['sequence_id'] ?? 0);
 
+    if ($action === 'toggle_publish_seq' && $seqId) {
+        $pdo->prepare("UPDATE sequences SET is_published = 1 - is_published WHERE id = ?")->execute([$seqId]);
+    }
+
+    if ($action === 'toggle_publish_module' && $moduleId) {
+        $pdo->prepare("UPDATE modules SET is_published = 1 - is_published WHERE id = ?")->execute([$moduleId]);
+    }
+
     if (in_array($action, ['move_seq_up', 'move_seq_down']) && $seqId) {
         $row = $pdo->prepare('SELECT id, competency_id, order_num FROM sequences WHERE id=?');
         $row->execute([$seqId]);
@@ -102,7 +110,7 @@ $seances = [];
 if ($sequenceId) {
     $stmt = $pdo->prepare("
         SELECT m.id, m.title, m.content_type, m.duration_hours, m.xp_reward,
-               m.is_mandatory, m.order_num, m.created_by, u.first_name, u.last_name
+               m.is_mandatory, m.order_num, m.created_by, m.is_published, u.first_name, u.last_name
         FROM modules m
         LEFT JOIN users u ON m.created_by = u.id
         WHERE m.sequence_id = ?
@@ -168,7 +176,7 @@ renderTopbar('Ordre des séances', [
         $isLast  = $j === $total - 1;
         $isOwn   = $s['created_by'] == $userId;
       ?>
-      <div class="seance-order-row" style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border-faint, rgba(255,255,255,.05));transition:background .15s">
+      <div class="seance-order-row" style="display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border-faint, rgba(255,255,255,.05));transition:background .15s,opacity .2s;<?= ($s['is_published'] ?? 1) ? '' : 'opacity:.45' ?>">
 
         <div style="width:28px;height:28px;border-radius:50%;background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:var(--text-muted);flex-shrink:0">
           <?= $j + 1 ?>
@@ -217,6 +225,15 @@ renderTopbar('Ordre des séances', [
           <?php endif; ?>
         </div>
 
+        <form method="POST" style="margin:0;flex-shrink:0" title="<?= ($s['is_published'] ?? 1) ? 'Publié — masquer aux apprenants' : 'Masqué — rendre visible' ?>">
+          <?= csrfField() ?>
+          <input type="hidden" name="action" value="toggle_publish_module">
+          <input type="hidden" name="module_id" value="<?= $s['id'] ?>">
+          <input type="hidden" name="sequence_id" value="<?= $sequenceId ?>">
+          <button type="submit" class="btn btn-ghost btn-sm" style="padding:4px 8px;color:<?= ($s['is_published'] ?? 1) ? '#10b981' : 'var(--text-muted)' ?>">
+            <i class="fas <?= ($s['is_published'] ?? 1) ? 'fa-eye' : 'fa-eye-slash' ?>"></i>
+          </button>
+        </form>
         <a href="<?= url('teacher/courses/seance_create.php?id='.$s['id']) ?>" class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:4px 10px" title="Modifier">
           <i class="fas fa-edit"></i>
         </a>

@@ -37,6 +37,12 @@ try {
 }
 if (!$seance) { setFlash('error', 'Séance introuvable.'); redirect(url('student/index.php')); }
 
+// Séance non publiée = inaccessible aux apprenants
+if (isStudent() && isset($seance['is_published']) && !$seance['is_published']) {
+    setFlash('error', 'Cette séance n\'est pas disponible pour le moment.');
+    redirect(url('student/access/index.php'));
+}
+
 // ── Contrôle d'accès ──────────────────────────────────────────────────────────
 $isPreview = !empty($_GET['preview']) && !isStudent();
 if (isStudent() && !($seance['is_preview'] ?? false)) {
@@ -98,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'compl
 // ── Séances adjacentes dans la même séquence ──────────────────────────────────
 $prevSeance = $nextSeance = null;
 if ($seance['seq_id']) {
-    $siblings = $pdo->prepare("SELECT id, title FROM modules WHERE sequence_id=? ORDER BY order_num, id");
+    $siblings = $pdo->prepare("SELECT id, title FROM modules WHERE sequence_id=? AND (is_published IS NULL OR is_published=1) ORDER BY order_num, id");
     $siblings->execute([$seance['seq_id']]);
     $sibList = $siblings->fetchAll();
     foreach ($sibList as $i => $sib) {

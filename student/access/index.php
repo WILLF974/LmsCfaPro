@@ -44,6 +44,8 @@ foreach ($grants as $g) {
         LEFT JOIN activity_types at ON c.activity_type_id = at.id
         LEFT JOIN module_progress mp ON mp.module_id = m.id AND mp.user_id = ?
         WHERE {$moduleWhere[$g['scope_type']]}
+          AND (m.is_published IS NULL OR m.is_published = 1)
+          AND (seq.is_published IS NULL OR seq.is_published = 1)
         ORDER BY at.code, c.code, seq.order_num, m.order_num
     ");
     $modsStmt->execute([$userId, (int)$g['scope_id']]);
@@ -68,6 +70,7 @@ foreach ($grants as $g) {
             LEFT JOIN competencies c ON seq.competency_id = c.id
             LEFT JOIN activity_types at ON c.activity_type_id = at.id
             WHERE {$seqWhereMap[$g['scope_type']]}
+              AND (seq.is_published IS NULL OR seq.is_published = 1)
             ORDER BY at.code, c.code, seq.order_num
         ");
         $seqsStmt->execute([(int)$g['scope_id']]);

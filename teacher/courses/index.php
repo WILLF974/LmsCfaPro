@@ -63,7 +63,7 @@ if (!$search && !$type) {
     if ($compId)    { $sqWhere2[] = 'c.id = ?';             $sqParams2[] = $compId; }
     if ($seqFilter) { $sqWhere2[] = 'seq.id = ?';           $sqParams2[] = $seqFilter; }
     $sqStmt2 = $pdo->prepare("
-        SELECT seq.id AS seq_id, seq.title AS seq_title,
+        SELECT seq.id AS seq_id, seq.title AS seq_title, seq.is_published AS seq_published,
                c.id AS comp_id, c.code AS comp_code, c.title AS comp_title,
                at.id AS at_id_val, at.code AS at_code, at.title AS at_title
         FROM sequences seq
@@ -79,7 +79,7 @@ if (!$search && !$type) {
         $sk = (string)$sq['seq_id'];
         if (!isset($tree[$ak]))                            $tree[$ak]                              = ['code'=>$sq['at_code'],'title'=>$sq['at_title'],'comps'=>[]];
         if (!isset($tree[$ak]['comps'][$ck]))              $tree[$ak]['comps'][$ck]               = ['code'=>$sq['comp_code'],'title'=>$sq['comp_title'],'seqs'=>[]];
-        if (!isset($tree[$ak]['comps'][$ck]['seqs'][$sk])) $tree[$ak]['comps'][$ck]['seqs'][$sk] = ['id'=>$sq['seq_id'],'title'=>$sq['seq_title'],'items'=>[]];
+        if (!isset($tree[$ak]['comps'][$ck]['seqs'][$sk])) $tree[$ak]['comps'][$ck]['seqs'][$sk] = ['id'=>$sq['seq_id'],'title'=>$sq['seq_title'],'published'=>(int)$sq['seq_published'],'items'=>[]];
     }
 }
 
@@ -90,7 +90,7 @@ foreach ($seances as $s) {
     $sk = $s['sequence_id'] !== null ? (string)$s['sequence_id'] : '__none';
     if (!isset($tree[$ak]))                            $tree[$ak]                              = ['code'=>$s['at_code'],'title'=>$s['at_title'],'comps'=>[]];
     if (!isset($tree[$ak]['comps'][$ck]))              $tree[$ak]['comps'][$ck]               = ['code'=>$s['comp_code'],'title'=>$s['comp_title'],'seqs'=>[]];
-    if (!isset($tree[$ak]['comps'][$ck]['seqs'][$sk])) $tree[$ak]['comps'][$ck]['seqs'][$sk] = ['id'=>$s['sequence_id'],'title'=>$s['sequence_title'],'items'=>[]];
+    if (!isset($tree[$ak]['comps'][$ck]['seqs'][$sk])) $tree[$ak]['comps'][$ck]['seqs'][$sk] = ['id'=>$s['sequence_id'],'title'=>$s['sequence_title'],'published'=>1,'items'=>[]];
     $tree[$ak]['comps'][$ck]['seqs'][$sk]['items'][] = $s;
 }
 
@@ -272,10 +272,19 @@ renderTopbar('Séances', [['Enseignant', url('teacher/index.php')], ['Séances',
             </form>
           </div>
           <?php endif; ?>
+          <form method="POST" action="<?= url('teacher/courses/order.php') ?>" style="margin:0" onclick="event.stopPropagation()" title="<?= ($seq['published'] ?? 1) ? 'Publié — masquer aux apprenants' : 'Masqué — rendre visible' ?>">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="toggle_publish_seq">
+            <input type="hidden" name="sequence_id" value="<?= $seq['id'] ?>">
+            <input type="hidden" name="redirect_to" value="teacher/courses/index.php">
+            <button type="submit" class="btn btn-ghost btn-sm" style="padding:1px 5px;height:19px;color:<?= ($seq['published'] ?? 1) ? '#10b981' : 'var(--text-muted)' ?>">
+              <i class="fas <?= ($seq['published'] ?? 1) ? 'fa-eye' : 'fa-eye-slash' ?>" style="font-size:10px"></i>
+            </button>
+          </form>
           <a href="<?= url('teacher/courses/seance_create.php?seq_id='.$seq['id']) ?>" class="btn btn-secondary btn-sm" style="font-size:10px;padding:2px 7px" title="Nouvelle séance" onclick="event.stopPropagation()"><i class="fas fa-plus"></i></a>
           <i class="fas fa-chevron-down" id="chev-<?= $seqNodeId ?>" style="color:var(--text-muted);transition:.25s"></i>
         </div>
-        <div id="<?= $seqNodeId ?>" style="display:block">
+        <div id="<?= $seqNodeId ?>" style="display:block;<?= ($seq['published'] ?? 1) ? '' : 'opacity:.45' ?>">
       <?php else: ?>
       <div><div>
       <?php endif; ?>
@@ -283,7 +292,7 @@ renderTopbar('Séances', [['Enseignant', url('teacher/index.php')], ['Séances',
         <?php $sIdx = 0; $sTotal = count($seq['items']); foreach ($seq['items'] as $s): $sIdx++;
           $isNew = $s['id'] === $highlight;
         ?>
-        <div id="seance-<?= $s['id'] ?>" style="display:flex;align-items:center;gap:10px;padding:8px 10px 8px <?= $seq['id']?'20':'10' ?>px;border-top:1px solid var(--border-faint,rgba(255,255,255,.04));<?= $isNew?'background:rgba(16,185,129,.07)':'' ?>">
+        <div id="seance-<?= $s['id'] ?>" style="display:flex;align-items:center;gap:10px;padding:8px 10px 8px <?= $seq['id']?'20':'10' ?>px;border-top:1px solid var(--border-faint,rgba(255,255,255,.04));<?= $isNew?'background:rgba(16,185,129,.07)':'' ?>;<?= !($s['is_published'] ?? 1)?'opacity:.45':'' ?>;transition:opacity .2s">
           <i class="<?= getContentTypeIcon($s['content_type']) ?>" style="font-size:15px;width:18px;color:var(--text-muted);flex-shrink:0"></i>
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><?= e($s['title']) ?><?php if (!$s['is_mandatory']): ?> <span style="font-size:9px;color:var(--text-faint)">(opt.)</span><?php endif; ?></div>
@@ -323,6 +332,16 @@ renderTopbar('Séances', [['Enseignant', url('teacher/index.php')], ['Séances',
           </div>
           <?php endif; ?>
           <div style="display:flex;gap:4px;flex-shrink:0">
+            <form method="POST" action="<?= url('teacher/courses/order.php') ?>" style="margin:0" title="<?= ($s['is_published'] ?? 1) ? 'Publié — masquer aux apprenants' : 'Masqué — rendre visible' ?>">
+              <?= csrfField() ?>
+              <input type="hidden" name="action" value="toggle_publish_module">
+              <input type="hidden" name="module_id" value="<?= $s['id'] ?>">
+              <input type="hidden" name="sequence_id" value="<?= $seq['id'] ?>">
+              <input type="hidden" name="redirect_to" value="teacher/courses/index.php">
+              <button type="submit" class="btn btn-ghost btn-sm" style="color:<?= ($s['is_published'] ?? 1) ? '#10b981' : 'var(--text-muted)' ?>">
+                <i class="fas <?= ($s['is_published'] ?? 1) ? 'fa-eye' : 'fa-eye-slash' ?>"></i>
+              </button>
+            </form>
             <a href="<?= url('teacher/courses/seance_create.php?id='.$s['id']) ?>" class="btn btn-secondary btn-sm" title="Modifier"><i class="fas fa-edit"></i></a>
             <form method="POST" action="<?= url('teacher/courses/delete.php') ?>" style="display:inline" onsubmit="return confirm('Supprimer la séance « <?= e(addslashes($s['title'])) ?> » ?\n\nCette action est irréversible.')">
               <?= csrfField() ?>
