@@ -189,31 +189,66 @@ renderTopbar($pageTitle, [
 
     <!-- Contenu -->
     <div class="card" style="margin-bottom:16px;overflow:hidden">
-      <?php if ($contentType === 'video' && $embedUrl): ?>
-        <?php if (str_contains($embedUrl, 'youtube.com/embed') || str_contains($embedUrl, 'vimeo.com')): ?>
+      <?php if ($contentType === 'video'):
+        $videoFile = !$embedUrl && ($seance['file_path'] ?? '') ? uploadUrl($seance['file_path']) : '';
+        $finalVideoUrl = $embedUrl ?: $videoFile;
+      ?>
+        <?php if ($finalVideoUrl): ?>
+        <?php if (str_contains($finalVideoUrl, 'youtube.com/embed') || str_contains($finalVideoUrl, 'vimeo.com')): ?>
         <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
-          <iframe src="<?= e($embedUrl) ?>" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allowfullscreen loading="lazy"></iframe>
+          <iframe src="<?= e($finalVideoUrl) ?>" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allowfullscreen loading="lazy"></iframe>
         </div>
         <?php else: ?>
         <video controls style="width:100%;max-height:480px;background:#000;display:block">
-          <source src="<?= e($embedUrl) ?>">
+          <source src="<?= e($finalVideoUrl) ?>">
           Votre navigateur ne supporte pas la lecture vidéo.
         </video>
         <?php endif; ?>
+        <?php endif; ?>
 
-      <?php elseif ($contentType === 'pdf' && $contentUrl): ?>
+      <?php elseif ($contentType === 'pdf'):
+        $filePath = $seance['file_path'] ?? '';
+        // file_path peut être un JSON (pages multiples) ou un chemin simple
+        $pdfPages = [];
+        if ($filePath) {
+            $decoded = json_decode($filePath, true);
+            if (is_array($decoded)) {
+                $pdfPages = array_map(fn($p) => is_array($p) ? ($p['url'] ?? uploadUrl($p['path'] ?? '')) : uploadUrl($p), $decoded);
+            } else {
+                $pdfPages = [uploadUrl($filePath)];
+            }
+        } elseif ($contentUrl) {
+            $pdfPages = [$contentUrl];
+        }
+      ?>
+        <?php if ($pdfPages): ?>
         <div style="height:600px">
-          <iframe src="<?= e(str_starts_with($contentUrl, '/') || str_starts_with($contentUrl, 'http') ? $contentUrl : url($contentUrl)) ?>"
-                  style="width:100%;height:100%;border:0" loading="lazy"></iframe>
+          <iframe src="<?= e($pdfPages[0]) ?>" style="width:100%;height:100%;border:0" loading="lazy"></iframe>
         </div>
+        <?php if (count($pdfPages) > 1): ?>
+        <div style="padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border-color)">
+          <?php foreach ($pdfPages as $pi => $purl): ?>
+          <a href="<?= e($purl) ?>" target="_blank" class="btn btn-ghost btn-sm">Fichier <?= $pi+1 ?></a>
+          <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+        <?php else: ?>
+        <div style="padding:24px;text-align:center;color:var(--text-muted);font-style:italic">
+          <i class="fas fa-info-circle" style="margin-right:6px"></i> Contenu non disponible.
+        </div>
+        <?php endif; ?>
 
-      <?php elseif ($contentType === 'audio' && $contentUrl): ?>
+      <?php elseif ($contentType === 'audio'):
+        $audioSrc = $contentUrl ?: ($seance['file_path'] ? uploadUrl($seance['file_path']) : '');
+      ?>
+        <?php if ($audioSrc): ?>
         <div style="padding:24px">
           <audio controls style="width:100%">
-            <source src="<?= e($contentUrl) ?>">
+            <source src="<?= e($audioSrc) ?>">
             Votre navigateur ne supporte pas la lecture audio.
           </audio>
         </div>
+        <?php endif; ?>
 
       <?php elseif ($contentType === 'text' || $contentBody): ?>
         <div class="rich-content" style="padding:24px 28px;line-height:1.7">
