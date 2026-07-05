@@ -53,6 +53,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 setFlash('success', 'Étudiant inscrit à la formation.');
             }
         }
+    } elseif ($_POST['action'] === 'assign_tutor') {
+        $teacherId = (int)($_POST['teacher_id'] ?? 0);
+        $notes     = mb_substr(trim($_POST['notes'] ?? ''), 0, 500);
+        if ($userId && $teacherId) {
+            // Révoquer le tutorat actif précédent
+            $pdo->prepare("UPDATE tutor_assignments SET revoked_at=NOW(), revoked_by=? WHERE student_id=? AND revoked_at IS NULL")
+                ->execute([$_SESSION['user_id'], $userId]);
+            // Créer le nouveau tutorat
+            $pdo->prepare("INSERT INTO tutor_assignments (student_id, teacher_id, assigned_by, notes) VALUES (?,?,?,?)")
+                ->execute([$userId, $teacherId, $_SESSION['user_id'], $notes ?: null]);
+            // Infos pour les notifications
+            $sRow = $pdo->prepare('SELECT first_name,last_name FROM users WHERE id=?'); $sRow->execute([$userId]); $s = $sRow->fetch();
+            $tRow = $pdo->prepare('SELECT first_name,last_name FROM users WHERE id=?'); $tRow->execute([$teacherId]); $t = $tRow->fetch();
+            $sName = $s['first_name'].' '.$s['last_name'];
+            $tName = $t['first_name'].' '.$t['last_name'];
+            createNotification($userId, 'Tuteur assigné', 'Votre tuteur est désormais '.$tName.'. N\'hésitez pas à le contacter pour votre accompagnement.', 'success');
+            createNotification($teacherId, 'Nouveau tutorat', 'Vous êtes désormais tuteur de '.$sName.'. Consultez son suivi pour l\'accompagner.', 'info', url('admin/users/progress.php?id='.$userId));
+            auditLog('tutor_assigned', 'tutor_assignment', $userId, [], ['teacher_id'=>$teacherId]);
+            setFlash('success', 'Tuteur assigné. Les deux parties ont été notifiées.');
+        }
+    } elseif ($_POST['action'] === 'revoke_tutor') {
+        $pdo->prepare("UPDATE tutor_assignments SET revoked_at=NOW(), revoked_by=? WHERE student_id=? AND revoked_at IS NULL")
+            ->execute([$_SESSION['user_id'], $userId]);
+        auditLog('tutor_revoked', 'tutor_assignment', $userId);
+        setFlash('success', 'Tutorat révoqué.');
     }
     $qs = http_build_query(array_filter(['role' => $_GET['role'] ?? '', 'status' => $_GET['status'] ?? '', 'q' => $_GET['q'] ?? '']));
     redirect(url('admin/users/index.php' . ($qs ? '?' . $qs : '')));
@@ -82,13 +107,30 @@ $p = paginate((int)$total->fetchColumn(), ITEMS_PER_PAGE, $page);
 $stmt = $pdo->prepare("
     SELECT u.*,
            (SELECT COUNT(*) FROM enrollments e WHERE e.user_id=u.id) as enrollment_count,
-           (SELECT COUNT(*) FROM enrollments e WHERE e.user_id=u.id AND e.status='pending') as pending_enrollments
+           (SELECT COUNT(*) FROM enrollments e WHERE e.user_id=u.id AND e.status='pending') as pending_enrollments,
+           (SELECT CONCAT(t.first_name,' ',t.last_name) FROM tutor_assignments ta JOIN users t ON ta.teacher_id=t.id WHERE ta.student_id=u.id AND ta.revoked_at IS NULL ORDER BY ta.assigned_at DESC LIMIT 1) as tutor_name,
+           (SELECT ta.teacher_id FROM tutor_assignments ta WHERE ta.student_id=u.id AND ta.revoked_at IS NULL ORDER BY ta.assigned_at DESC LIMIT 1) as tutor_id
     FROM users u WHERE $whereStr ORDER BY u.created_at DESC LIMIT ? OFFSET ?");
-$stmt->execute(array_merge($params, [$p['perPage'], $p['offset']]));
-$users = $stmt->fetchAll();
+try {
+    $stmt->execute(array_merge($params, [$p['perPage'], $p['offset']]));
+    $users = $stmt->fetchAll();
+} catch (PDOException $e) {
+    // tutor_assignments n'existe pas encore (avant migration)
+    $stmt2 = $pdo->prepare("
+        SELECT u.*,
+               (SELECT COUNT(*) FROM enrollments e WHERE e.user_id=u.id) as enrollment_count,
+               (SELECT COUNT(*) FROM enrollments e WHERE e.user_id=u.id AND e.status='pending') as pending_enrollments,
+               NULL as tutor_name, NULL as tutor_id
+        FROM users u WHERE $whereStr ORDER BY u.created_at DESC LIMIT ? OFFSET ?");
+    $stmt2->execute(array_merge($params, [$p['perPage'], $p['offset']]));
+    $users = $stmt2->fetchAll();
+}
 
 // Formations pour le modal inscription
 $formations = $pdo->query("SELECT id, title FROM formations WHERE status='active' ORDER BY title")->fetchAll();
+
+// Enseignants pour le modal tutorat
+$teachers = $pdo->query("SELECT id, first_name, last_name FROM users WHERE role='teacher' AND status='active' ORDER BY last_name, first_name")->fetchAll();
 
 $pageTitle = $isPedagogyOnly ? 'Apprenants' : 'Gestion des utilisateurs';
 renderHead($pageTitle);
@@ -175,6 +217,9 @@ renderTopbar($pageTitle, [
                 <div>
                   <div style="font-weight:700;color:white"><?= e($u['first_name'].' '.$u['last_name']) ?></div>
                   <div style="font-size:12px;color:var(--text-muted)"><?= e($u['email']) ?></div>
+                  <?php if ($u['role'] === 'student' && !empty($u['tutor_name'])): ?>
+                  <div style="font-size:11px;margin-top:3px;color:#a78bfa"><i class="fas fa-chalkboard-teacher" style="font-size:10px"></i> <?= e($u['tutor_name']) ?></div>
+                  <?php endif; ?>
                 </div>
               </div>
             </td>
@@ -215,6 +260,15 @@ renderTopbar($pageTitle, [
                 <?php endif; ?>
                 <?php if ($u['role'] === 'student'): ?>
                 <a href="<?= url('admin/users/progress.php?id='.$u['id']) ?>" class="btn btn-ghost btn-sm" title="Suivi pédagogique" style="color:var(--primary-light)"><i class="fas fa-chart-line"></i></a>
+                <a href="<?= url('admin/users/access.php?id='.$u['id']) ?>" class="btn btn-ghost btn-sm" title="Accès ressources" style="color:#a78bfa"><i class="fas fa-key"></i></a>
+                <a href="<?= url('student/cahier/index.php?id='.$u['id']) ?>" class="btn btn-ghost btn-sm" title="Cahier de texte" style="color:var(--text-muted)"><i class="fas fa-book-open"></i></a>
+                <?php if (!empty($teachers)): ?>
+                <button class="btn btn-ghost btn-sm" title="<?= $u['tutor_name'] ? 'Changer / révoquer le tuteur' : 'Assigner un tuteur' ?>"
+                  style="color:<?= $u['tutor_name'] ? '#a78bfa' : 'var(--text-muted)' ?>"
+                  onclick="openTutorModal(<?= $u['id'] ?>, '<?= e(addslashes($u['first_name'].' '.$u['last_name'])) ?>', <?= (int)($u['tutor_id'] ?? 0) ?>, '<?= e(addslashes($u['tutor_name'] ?? '')) ?>')">
+                  <i class="fas fa-chalkboard-teacher"></i>
+                </button>
+                <?php endif; ?>
                 <?php endif; ?>
                 <a href="<?= url('admin/users/edit.php?id='.$u['id']) ?>" class="btn btn-ghost btn-sm" title="Modifier"><i class="fas fa-edit"></i></a>
                 <?php if ($u['id'] !== (int)$_SESSION['user_id']): ?>
@@ -265,6 +319,62 @@ renderTopbar($pageTitle, [
     <?php endif; ?>
   </div>
 </div>
+<!-- Modal : Tutorat -->
+<?php if (!empty($teachers)): ?>
+<div id="modal-tutor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;align-items:center;justify-content:center">
+  <div class="card" style="width:480px;max-width:95vw">
+    <div class="card-header">
+      <h3 class="card-title"><i class="fas fa-chalkboard-teacher" style="color:#a78bfa"></i> Tutorat — <span id="tutor-student-name"></span></h3>
+      <button onclick="document.getElementById('modal-tutor').style.display='none'" class="btn-icon"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="card-body">
+      <!-- Tuteur actuel -->
+      <div id="current-tutor-info" style="display:none;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.25);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Tuteur actuel</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="font-size:14px;font-weight:700;color:#a78bfa"><i class="fas fa-chalkboard-teacher"></i> <span id="current-tutor-name"></span></div>
+          <form method="POST" id="revoke-tutor-form" style="margin:0">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="revoke_tutor">
+            <input type="hidden" name="user_id" id="revoke-student-id">
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3);font-size:11px"
+              onclick="return confirm('Révoquer ce tutorat ?')">
+              <i class="fas fa-times"></i> Révoquer
+            </button>
+          </form>
+        </div>
+      </div>
+      <!-- Formulaire d'assignation -->
+      <form method="POST" id="assign-tutor-form">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="assign_tutor">
+        <input type="hidden" name="user_id" id="tutor-student-id">
+        <div class="form-group" style="margin-bottom:14px">
+          <label class="form-label">Enseignant tuteur <span class="required">*</span></label>
+          <select name="teacher_id" id="tutor-teacher-select" class="form-control" required>
+            <option value="">— Choisir un enseignant —</option>
+            <?php foreach ($teachers as $t): ?>
+            <option value="<?= $t['id'] ?>"><?= e($t['first_name'].' '.$t['last_name']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label class="form-label">Notes (optionnel)</label>
+          <input type="text" name="notes" class="form-control" placeholder="Ex : suivi RNCP38676, accompagnement stage…" maxlength="500">
+        </div>
+        <div style="background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text-muted);margin-bottom:16px">
+          <i class="fas fa-bell" style="color:var(--primary-light)"></i> Une notification sera envoyée à l'apprenant et à l'enseignant.
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="btn btn-ghost" onclick="document.getElementById('modal-tutor').style.display='none'">Annuler</button>
+          <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> <span id="tutor-btn-label">Assigner</span></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <!-- Modal : Inscrire à une formation -->
 <?php if (!empty($formations)): ?>
 <div id="modal-enroll" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;align-items:center;justify-content:center">
@@ -302,6 +412,30 @@ function openEnrollModal(userId, userName) {
   document.getElementById('modal-enroll').style.display = 'flex';
 }
 document.getElementById('modal-enroll').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+</script>
+<?php endif; ?>
+<?php if (!empty($teachers)): ?>
+<script>
+function openTutorModal(studentId, studentName, currentTutorId, currentTutorName) {
+  document.getElementById('tutor-student-id').value  = studentId;
+  document.getElementById('revoke-student-id').value = studentId;
+  document.getElementById('tutor-student-name').textContent = studentName;
+  const sel = document.getElementById('tutor-teacher-select');
+  sel.value = currentTutorId || '';
+  const info = document.getElementById('current-tutor-info');
+  if (currentTutorName) {
+    document.getElementById('current-tutor-name').textContent = currentTutorName;
+    info.style.display = 'block';
+    document.getElementById('tutor-btn-label').textContent = 'Changer le tuteur';
+  } else {
+    info.style.display = 'none';
+    document.getElementById('tutor-btn-label').textContent = 'Assigner';
+  }
+  document.getElementById('modal-tutor').style.display = 'flex';
+}
+document.getElementById('modal-tutor').addEventListener('click', function(e) {
   if (e.target === this) this.style.display = 'none';
 });
 </script>

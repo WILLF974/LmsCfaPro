@@ -91,8 +91,20 @@ function renderSidebar(string $role): void {
     <a href="<?= url('admin/formations/index.php') ?>" class="nav-link <?= currentUrlContains('/formations') ? 'active' : '' ?>">
       <i class="fas fa-graduation-cap"></i> Formations
     </a>
-    <a href="<?= url('admin/users/index.php?role=student') ?>" class="nav-link <?= currentUrlContains('/admin/users') ? 'active' : '' ?>">
+    <a href="<?= url('pedagogy/sequences/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/sequences') ? 'active' : '' ?>">
+      <i class="fas fa-list-ol"></i> Séquences
+    </a>
+    <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= (currentUrlContains('/courses/index') || currentUrlContains('/courses/seance_create')) ? 'active' : '' ?>">
+      <i class="fas fa-bookmark"></i> Séances
+    </a>
+    <a href="<?= url('admin/users/index.php?role=student') ?>" class="nav-link <?= (currentUrlContains('/admin/users') && !currentUrlContains('/admin/users/access')) ? 'active' : '' ?>">
       <i class="fas fa-users"></i> Apprenants
+    </a>
+    <a href="<?= url('pedagogy/access/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/access') ? 'active' : '' ?>">
+      <i class="fas fa-key"></i> Accès ressources
+    </a>
+    <a href="<?= url('pedagogy/cohorts/index.php') ?>" class="nav-link <?= currentUrlContains('/pedagogy/cohorts') ? 'active' : '' ?>">
+      <i class="fas fa-layer-group"></i> Cohortes
     </a>
     <a href="<?= url('admin/reports/index.php') ?>" class="nav-link">
       <i class="fas fa-chart-bar"></i> Rapports
@@ -103,8 +115,11 @@ function renderSidebar(string $role): void {
     <a href="<?= url('teacher/index.php') ?>" class="nav-link <?= currentUrlContains('/teacher/index') ? 'active' : '' ?>">
       <i class="fas fa-home"></i> Tableau de bord
     </a>
-    <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= currentUrlContains('/courses') ? 'active' : '' ?>">
-      <i class="fas fa-book-open"></i> Mes capsules
+    <a href="<?= url('teacher/courses/sequences.php') ?>" class="nav-link <?= currentUrlContains('/courses/sequences') ? 'active' : '' ?>">
+      <i class="fas fa-list-ol"></i> Séquences
+    </a>
+    <a href="<?= url('teacher/courses/index.php') ?>" class="nav-link <?= (currentUrlContains('/courses/index') || currentUrlContains('/courses/seance_create')) ? 'active' : '' ?>">
+      <i class="fas fa-bookmark"></i> Séances
     </a>
     <a href="<?= url('teacher/quizzes/index.php') ?>" class="nav-link <?= currentUrlContains('/quizzes') ? 'active' : '' ?>">
       <i class="fas fa-question-circle"></i> Quiz & Éval
@@ -115,6 +130,12 @@ function renderSidebar(string $role): void {
     <a href="<?= url('teacher/students/index.php') ?>" class="nav-link <?= currentUrlContains('/students') ? 'active' : '' ?>">
       <i class="fas fa-user-graduate"></i> Mes étudiants
     </a>
+    <a href="<?= url('teacher/cahier/index.php') ?>" class="nav-link <?= (currentUrlContains('/teacher/cahier') || currentUrlContains('/cohorts/agenda') || currentUrlContains('/student/cahier')) ? 'active' : '' ?>">
+      <i class="fas fa-book-open"></i> Cahier de texte
+    </a>
+    <a href="<?= url('student/kanban/index.php') ?>" class="nav-link <?= currentUrlContains('/kanban') ? 'active' : '' ?>">
+      <i class="fas fa-columns"></i> Kanban
+    </a>
     <a href="<?= url('teacher/evaluations/index.php') ?>" class="nav-link <?= currentUrlContains('/evaluations') ? 'active' : '' ?>">
       <i class="fas fa-tasks"></i> Corrections
     </a>
@@ -123,6 +144,12 @@ function renderSidebar(string $role): void {
     <div class="nav-section-title">Apprenant</div>
     <a href="<?= url('student/index.php') ?>" class="nav-link <?= currentUrlContains('/student/index') ? 'active' : '' ?>">
       <i class="fas fa-home"></i> Mon espace
+    </a>
+    <a href="<?= url('student/cahier/index.php') ?>" class="nav-link <?= currentUrlContains('/student/cahier') ? 'active' : '' ?>">
+      <i class="fas fa-book-open"></i> Cahier de texte
+    </a>
+    <a href="<?= url('student/kanban/index.php') ?>" class="nav-link <?= currentUrlContains('/student/kanban') ? 'active' : '' ?>">
+      <i class="fas fa-columns"></i> Kanban
     </a>
     <a href="<?= url('student/formations/index.php') ?>" class="nav-link <?= currentUrlContains('/student/formations') ? 'active' : '' ?>">
       <i class="fas fa-graduation-cap"></i> Mes formations
@@ -135,6 +162,10 @@ function renderSidebar(string $role): void {
     </a>
     <a href="<?= url('student/profile/index.php') ?>" class="nav-link <?= currentUrlContains('/profile') ? 'active' : '' ?>">
       <i class="fas fa-user"></i> Mon profil
+    </a>
+    <a href="<?= url('student/notifications/index.php') ?>" class="nav-link <?= currentUrlContains('/student/notifications') ? 'active' : '' ?>">
+      <i class="fas fa-bell"></i> Corrections
+      <?php if ($unreadNotif > 0): ?><span class="nav-badge" data-notif><?= $unreadNotif ?></span><?php endif; ?>
     </a>
 <?php endif; ?>
 
@@ -223,7 +254,7 @@ function renderTopbar(string $title, array $breadcrumb = []): void {
     <div style="position:relative">
       <button class="btn-icon" id="notif-btn" title="Notifications">
         <i class="fas fa-bell"></i>
-        <?php if ($unreadNotif > 0): ?><span class="notif-dot"></span><?php endif; ?>
+        <?php if ($unreadNotif > 0): ?><span class="notif-count"><?= $unreadNotif ?></span><?php endif; ?>
       </button>
       <div class="notif-panel" id="notif-panel">
         <div class="notif-header">
@@ -240,7 +271,11 @@ function renderTopbar(string $title, array $breadcrumb = []): void {
         <div class="notif-item <?= !$n['read_at'] ? 'unread' : '' ?>">
           <?php if (!$n['read_at']): ?><div class="notif-dot"></div><?php endif; ?>
           <div class="notif-body">
+            <?php if ($n['action_url']): ?>
+            <a href="<?= e($n['action_url']) ?>" class="notif-title" style="text-decoration:none;color:white"><?= e($n['title']) ?></a>
+            <?php else: ?>
             <div class="notif-title"><?= e($n['title']) ?></div>
+            <?php endif; ?>
             <div class="notif-text"><?= e($n['message']) ?></div>
             <div class="notif-time"><?= timeAgo($n['created_at']) ?></div>
           </div>

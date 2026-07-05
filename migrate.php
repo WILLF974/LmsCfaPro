@@ -47,6 +47,169 @@ $migrations = [
         ALTER TABLE `quiz_attempts`
         ADD COLUMN IF NOT EXISTS `graded_at` DATETIME DEFAULT NULL
     ",
+    // ── Migration 014 : Kanban ───────────────────────────────────────────────
+    '014_create_kanban_boards' => "
+        CREATE TABLE IF NOT EXISTS `kanban_boards` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `cohort_id` INT UNSIGNED DEFAULT NULL,
+          `student_id` INT UNSIGNED DEFAULT NULL,
+          `created_by` INT UNSIGNED NOT NULL,
+          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY `unique_cohort_board` (`cohort_id`),
+          UNIQUE KEY `unique_student_board` (`student_id`),
+          FOREIGN KEY (`cohort_id`) REFERENCES `cohorts`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
+          INDEX `idx_kb_student` (`student_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    '014_create_kanban_cards' => "
+        CREATE TABLE IF NOT EXISTS `kanban_cards` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `board_id` INT UNSIGNED NOT NULL,
+          `title` VARCHAR(255) NOT NULL,
+          `description` TEXT DEFAULT NULL,
+          `due_date` DATE DEFAULT NULL,
+          `sequence_id` INT UNSIGNED DEFAULT NULL,
+          `module_id` INT UNSIGNED DEFAULT NULL,
+          `status` ENUM('todo','in_progress','submitted','graded') NOT NULL DEFAULT 'todo',
+          `position` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+          `created_by` INT UNSIGNED NOT NULL,
+          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`board_id`) REFERENCES `kanban_boards`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`sequence_id`) REFERENCES `sequences`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`module_id`) REFERENCES `modules`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
+          INDEX `idx_kc_board_status` (`board_id`, `status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    '014_create_kanban_member_status' => "
+        CREATE TABLE IF NOT EXISTS `kanban_member_status` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `board_id` INT UNSIGNED NOT NULL,
+          `student_id` INT UNSIGNED NOT NULL,
+          `status` ENUM('todo','in_progress','submitted','graded') NOT NULL DEFAULT 'todo',
+          `updated_by` INT UNSIGNED DEFAULT NULL,
+          `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY `unique_member_status` (`board_id`, `student_id`),
+          FOREIGN KEY (`board_id`) REFERENCES `kanban_boards`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`updated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          INDEX `idx_kms_student` (`student_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
+    // ── Migration 010 : Cohortes ─────────────────────────────────────────────
+    '010_create_cohorts' => "
+        CREATE TABLE IF NOT EXISTS `cohorts` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `name` VARCHAR(255) NOT NULL,
+          `rncp_title_id` INT UNSIGNED DEFAULT NULL,
+          `year` SMALLINT UNSIGNED DEFAULT NULL,
+          `description` TEXT DEFAULT NULL,
+          `created_by` INT UNSIGNED DEFAULT NULL,
+          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (`rncp_title_id`) REFERENCES `rncp_titles`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`created_by`)    REFERENCES `users`(`id`)       ON DELETE SET NULL,
+          INDEX `idx_rncp` (`rncp_title_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    '010_create_cohort_members' => "
+        CREATE TABLE IF NOT EXISTS `cohort_members` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `cohort_id` INT UNSIGNED NOT NULL,
+          `student_id` INT UNSIGNED NOT NULL,
+          `joined_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `added_by` INT UNSIGNED DEFAULT NULL,
+          UNIQUE KEY `unique_member` (`cohort_id`, `student_id`),
+          FOREIGN KEY (`cohort_id`)  REFERENCES `cohorts`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`student_id`) REFERENCES `users`(`id`)   ON DELETE CASCADE,
+          FOREIGN KEY (`added_by`)   REFERENCES `users`(`id`)   ON DELETE SET NULL,
+          INDEX `idx_student` (`student_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+    '011_cohort_member_excluded' => "
+        ALTER TABLE `cohort_members`
+        ADD COLUMN IF NOT EXISTS `excluded_from_stats` TINYINT(1) NOT NULL DEFAULT 0
+    ",
+    '013_agenda_cohort_nullable' => "
+        ALTER TABLE `agenda_entries`
+        MODIFY COLUMN `cohort_id` INT UNSIGNED DEFAULT NULL
+    ",
+    '013_agenda_student_id' => "
+        ALTER TABLE `agenda_entries`
+        ADD COLUMN IF NOT EXISTS `student_id` INT UNSIGNED DEFAULT NULL AFTER `cohort_id`
+    ",
+    '013_agenda_student_fk' => "
+        ALTER TABLE `agenda_entries`
+        ADD CONSTRAINT `fk_agenda_student_id` FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+        ADD INDEX `idx_agenda_student_date` (`student_id`, `scheduled_date`)
+    ",
+    '012_create_agenda_entries' => "
+        CREATE TABLE IF NOT EXISTS `agenda_entries` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `cohort_id` INT UNSIGNED NOT NULL,
+          `title` VARCHAR(255) NOT NULL,
+          `instructions` TEXT DEFAULT NULL,
+          `scheduled_date` DATE NOT NULL,
+          `time_start` TIME DEFAULT NULL,
+          `time_end` TIME DEFAULT NULL,
+          `sequence_id` INT UNSIGNED DEFAULT NULL,
+          `module_id` INT UNSIGNED DEFAULT NULL,
+          `created_by` INT UNSIGNED NOT NULL,
+          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `updated_by` INT UNSIGNED DEFAULT NULL,
+          `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (`cohort_id`)   REFERENCES `cohorts`(`id`)    ON DELETE CASCADE,
+          FOREIGN KEY (`sequence_id`) REFERENCES `sequences`(`id`)  ON DELETE SET NULL,
+          FOREIGN KEY (`module_id`)   REFERENCES `modules`(`id`)    ON DELETE SET NULL,
+          FOREIGN KEY (`created_by`)  REFERENCES `users`(`id`)      ON DELETE RESTRICT,
+          FOREIGN KEY (`updated_by`)  REFERENCES `users`(`id`)      ON DELETE SET NULL,
+          INDEX `idx_cohort_date` (`cohort_id`, `scheduled_date`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
+    // ── Migration 009 : Tutorat ──────────────────────────────────────────────
+    '009_create_tutor_assignments' => "
+        CREATE TABLE IF NOT EXISTS `tutor_assignments` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `student_id` INT UNSIGNED NOT NULL,
+          `teacher_id` INT UNSIGNED NOT NULL,
+          `assigned_by` INT UNSIGNED DEFAULT NULL,
+          `assigned_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `revoked_at` DATETIME DEFAULT NULL,
+          `revoked_by` INT UNSIGNED DEFAULT NULL,
+          `notes` VARCHAR(500) DEFAULT NULL,
+          FOREIGN KEY (`student_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`teacher_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`assigned_by`)  REFERENCES `users`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`revoked_by`)   REFERENCES `users`(`id`) ON DELETE SET NULL,
+          INDEX `idx_student_active` (`student_id`, `revoked_at`),
+          INDEX `idx_teacher` (`teacher_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
+    // ── Migration 015 : Accès par périmètre pédagogique ────────────────────────
+    '015_create_access_grants' => "
+        CREATE TABLE IF NOT EXISTS `access_grants` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT UNSIGNED NOT NULL,
+          `scope_type` ENUM('rncp_title','activity_type','competency','sequence','module') NOT NULL,
+          `scope_id` INT UNSIGNED NOT NULL,
+          `granted_by` INT UNSIGNED DEFAULT NULL,
+          `granted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `revoked_at` DATETIME DEFAULT NULL,
+          `revoked_by` INT UNSIGNED DEFAULT NULL,
+          `notes` VARCHAR(255) DEFAULT NULL,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`granted_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`revoked_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          UNIQUE KEY `unique_grant` (`user_id`, `scope_type`, `scope_id`),
+          INDEX `idx_user_active` (`user_id`, `revoked_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
     '004_create_case_study_submissions' => "
         CREATE TABLE IF NOT EXISTS `case_study_submissions` (
           `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -79,7 +242,9 @@ foreach ($migrations as $name => $sql) {
         // "Duplicate column" = déjà appliqué, c'est OK
         $msg = $e->getMessage();
         $alreadyDone = strpos($msg, 'Duplicate column') !== false
-                    || strpos($msg, 'already exists') !== false;
+                    || strpos($msg, 'already exists') !== false
+                    || strpos($msg, 'Duplicate key name') !== false
+                    || strpos($msg, 'Duplicate foreign key') !== false;
         $results[] = [
             'status' => $alreadyDone ? 'skip' : 'error',
             'name'   => $name,

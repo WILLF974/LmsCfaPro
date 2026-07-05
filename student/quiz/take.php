@@ -16,6 +16,20 @@ $quizStmt->execute([$quizId]);
 $quiz = $quizStmt->fetch();
 if (!$quiz) { setFlash('error', 'Quiz introuvable.'); redirect(url('student/formations/index.php')); }
 
+// Vérifier l'accès (inscription formation OU access_grant)
+if (isStudent()) {
+    $scope = [
+        'formation_id'    => (int)($quiz['formation_id']    ?? 0),
+        'module_id'       => (int)($quiz['module_id']       ?? 0),
+        'competency_id'   => (int)($quiz['competency_id']   ?? 0),
+        'activity_type_id'=> (int)($quiz['activity_type_id'] ?? 0),
+    ];
+    if (!hasContentAccess($userId, $scope)) {
+        setFlash('error', 'Vous n\'avez pas accès à ce quiz.');
+        redirect(url('student/formations/index.php'));
+    }
+}
+
 // Vérifier le nombre de tentatives déjà utilisées
 $attemptsStmt = $pdo->prepare('SELECT COUNT(*) FROM quiz_attempts WHERE user_id = ? AND quiz_id = ? AND status = "completed"');
 $attemptsStmt->execute([$userId, $quizId]);

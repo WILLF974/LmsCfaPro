@@ -125,12 +125,26 @@ function uploadFile(array $file, string $destination, array $allowedTypes = [], 
  */
 function formatDate(string $date, string $format = 'd/m/Y'): string {
     if (!$date) return '-';
-    return date($format, strtotime($date));
+    try {
+        $dt = new DateTimeImmutable($date);
+        return $dt->format($format);
+    } catch (Exception) { return '-'; }
 }
 
 function formatDateTime(string $date): string {
     if (!$date) return '-';
-    return date('d/m/Y H:i', strtotime($date));
+    try {
+        $dt = new DateTimeImmutable($date);
+        return $dt->format('d/m/Y H:i');
+    } catch (Exception) { return '-'; }
+}
+
+function fmtSeconds(int $sec): string {
+    if ($sec <= 0) return '—';
+    $h = intdiv($sec, 3600);
+    $m = intdiv($sec % 3600, 60);
+    if ($h > 0) return $h . 'h' . ($m > 0 ? str_pad($m, 2, '0', STR_PAD_LEFT) . 'min' : '');
+    return $m > 0 ? $m . 'min' : '<1min';
 }
 
 function formatDuration(int $minutes): string {
@@ -228,6 +242,78 @@ function createNotification(int $userId, string $title, string $message, string 
     $pdo = getDB();
     $stmt = $pdo->prepare('INSERT INTO notifications (user_id, title, message, type, action_url) VALUES (?, ?, ?, ?, ?)');
     $stmt->execute([$userId, $title, $message, $type, $actionUrl]);
+}
+
+/**
+ * Contrôle d'accès unifié : enrollment OU access_grant
+ * $scope peut contenir formation_id, module_id, sequence_id, competency_id, activity_type_id, rncp_title_id
+ */
+function hasContentAccess(int $userId, array $scope): bool {
+    $pdo = getDB();
+
+    $formationId    = (int)($scope['formation_id']    ?? 0);
+    $moduleId       = (int)($scope['module_id']       ?? 0);
+    $sequenceId     = (int)($scope['sequence_id']     ?? 0);
+    $competencyId   = (int)($scope['competency_id']   ?? 0);
+    $activityTypeId = (int)($scope['activity_type_id'] ?? 0);
+    $rncpTitleId    = (int)($scope['rncp_title_id']   ?? 0);
+
+    // 1. Inscription formation (mécanisme existant, prioritaire)
+    if ($formationId) {
+        $e = $pdo->prepare("SELECT id FROM enrollments WHERE user_id=? AND formation_id=? AND status IN ('active','completed') LIMIT 1");
+        $e->execute([$userId, $formationId]);
+        if ($e->fetch()) return true;
+    }
+
+    // 2. Résolution de l'ascendance depuis module_id (requêtes séquentielles simples)
+    if ($moduleId && !$sequenceId) {
+        try {
+            $r = $pdo->prepare("SELECT sequence_id FROM modules WHERE id=?");
+            $r->execute([$moduleId]);
+            $sequenceId = (int)$r->fetchColumn() ?: $sequenceId;
+        } catch (\Exception $e) {}
+    }
+    if ($sequenceId && !$competencyId) {
+        try {
+            $r = $pdo->prepare("SELECT competency_id FROM sequences WHERE id=?");
+            $r->execute([$sequenceId]);
+            $competencyId = (int)$r->fetchColumn() ?: $competencyId;
+        } catch (\Exception $e) {}
+    }
+    if ($competencyId && !$activityTypeId) {
+        try {
+            $r = $pdo->prepare("SELECT activity_type_id FROM competencies WHERE id=?");
+            $r->execute([$competencyId]);
+            $activityTypeId = (int)$r->fetchColumn() ?: $activityTypeId;
+        } catch (\Exception $e) {}
+    }
+    if ($activityTypeId && !$rncpTitleId) {
+        try {
+            $r = $pdo->prepare("SELECT rncp_title_id FROM activity_types WHERE id=?");
+            $r->execute([$activityTypeId]);
+            $rncpTitleId = (int)$r->fetchColumn() ?: $rncpTitleId;
+        } catch (\Exception $e) {}
+    }
+
+    // 3. Vérification access_grants (du plus précis au plus large)
+    $pairs = [];
+    if ($moduleId)       $pairs[] = ['module',        $moduleId];
+    if ($sequenceId)     $pairs[] = ['sequence',       $sequenceId];
+    if ($competencyId)   $pairs[] = ['competency',     $competencyId];
+    if ($activityTypeId) $pairs[] = ['activity_type',  $activityTypeId];
+    if ($rncpTitleId)    $pairs[] = ['rncp_title',     $rncpTitleId];
+
+    if (empty($pairs)) return false;
+
+    try {
+        foreach ($pairs as [$type, $id]) {
+            $g = $pdo->prepare("SELECT id FROM access_grants WHERE user_id=? AND scope_type=? AND scope_id=? AND revoked_at IS NULL LIMIT 1");
+            $g->execute([$userId, $type, $id]);
+            if ($g->fetch()) return true;
+        }
+    } catch (\Exception $e) { /* table pas encore créée */ }
+
+    return false;
 }
 
 /**
@@ -333,6 +419,12 @@ function updateEnrollmentProgress(int $userId, int $formationId): void {
  */
 function sanitizeInput(mixed $value): string {
     return trim(htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'));
+}
+
+function sanitizeRichHtml(?string $html): string {
+    if ($html === null) return '';
+    $allowed = '<p><br><b><strong><i><em><u><ul><ol><li><h1><h2><h3><h4><h5><a><blockquote><hr><img><span><div>';
+    return strip_tags($html, $allowed);
 }
 
 function validateEmail(string $email): bool {

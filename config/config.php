@@ -68,7 +68,7 @@ if (DEBUG) {
     error_reporting(0);
 }
 
-// Timezone
+// Timezone (défaut bootstrap ; écrasé par le réglage admin après chargement de la DB)
 date_default_timezone_set('Europe/Paris');
 
 // Charset
@@ -91,6 +91,11 @@ if (session_status() === PHP_SESSION_NONE) {
     ]);
     session_start();
 }
+
+// Timezone depuis les paramètres admin (écrase le défaut Paris)
+$_tz = getSetting('timezone', 'Indian/Reunion');
+if ($_tz) date_default_timezone_set($_tz);
+unset($_tz);
 
 // Regénérer le token CSRF si absent
 if (empty($_SESSION[CSRF_TOKEN_NAME])) {

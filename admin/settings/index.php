@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'registration_open' => isset($_POST['registration_open']) ? '1' : '0',
         'maintenance_mode'  => isset($_POST['maintenance_mode']) ? '1' : '0',
         'default_language'    => $_POST['default_language'] ?? 'fr',
-        'timezone'            => $_POST['timezone'] ?? 'Europe/Paris',
+        'timezone'            => $_POST['timezone'] ?? 'Indian/Reunion',
         'anthropic_api_key'   => trim($_POST['anthropic_api_key'] ?? ''),
     ];
 
@@ -173,7 +173,7 @@ renderTopbar('Paramètres', [['Admin', url('admin/index.php')], ['Paramètres', 
             <div class="form-group">
               <label class="form-label">Fuseau horaire</label>
               <select name="timezone" class="form-control">
-                <?php foreach (['Europe/Paris'=>'Europe/Paris','UTC'=>'UTC','Europe/London'=>'Europe/London','America/New_York'=>'America/New_York'] as $tz => $label): ?>
+                <?php foreach (['Indian/Reunion'=>'Île de La Réunion (UTC+4)','Europe/Paris'=>'France métropolitaine (UTC+1/+2)','Indian/Mayotte'=>'Mayotte (UTC+3)','America/Martinique'=>'Martinique (UTC-4)','America/Cayenne'=>'Guyane (UTC-3)','Pacific/Noumea'=>'Nouvelle-Calédonie (UTC+11)','Pacific/Tahiti'=>'Polynésie française (UTC-10)','UTC'=>'UTC','Europe/London'=>'Royaume-Uni (UTC/+1)','America/New_York'=>'New York (UTC-5/-4)'] as $tz => $label): ?>
                 <option value="<?= $tz ?>" <?= ($settings['timezone'] ?? 'Europe/Paris') === $tz ? 'selected' : '' ?>><?= $label ?></option>
                 <?php endforeach; ?>
               </select>
