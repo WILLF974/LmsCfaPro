@@ -81,12 +81,6 @@ $stats = $pdo->query("
     FROM sequences
 ")->fetch();
 
-// Nombre de compétences avec doublons
-$nbDupes = (int)$pdo->query("
-    SELECT COUNT(*) FROM (
-        SELECT competency_id FROM sequences GROUP BY competency_id HAVING COUNT(*) > 1
-    ) AS d
-")->fetchColumn();
 
 renderHead('Séquences — Pédagogie');
 renderSidebar('pedagogy');
@@ -125,20 +119,6 @@ renderTopbar('Séquences pédagogiques', [
     </div>
     <?php endforeach; ?>
 
-    <!-- Doublons (cliquable) -->
-    <a href="<?= url('pedagogy/sequences/merge.php') ?>" style="text-decoration:none">
-      <div class="card" style="border-color:<?= $nbDupes > 0 ? 'rgba(245,158,11,.4)' : 'var(--border-color)' ?>;transition:border-color .15s">
-        <div class="card-body" style="padding:14px 16px;display:flex;align-items:center;gap:12px">
-          <div style="width:36px;height:36px;border-radius:9px;background:rgba(245,158,11,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-            <i class="fas fa-compress-arrows-alt" style="color:#f59e0b;font-size:15px"></i>
-          </div>
-          <div>
-            <div style="font-weight:800;font-size:20px;color:<?= $nbDupes > 0 ? '#f59e0b' : 'var(--text-primary)' ?>;line-height:1"><?= $nbDupes ?></div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><?= $nbDupes > 0 ? 'Doublons → Fusionner' : 'Aucun doublon' ?></div>
-          </div>
-        </div>
-      </div>
-    </a>
   </div>
 
   <!-- Filtres -->
