@@ -624,7 +624,7 @@ renderTopbar($pageTitle, [
               <?= $editId ? 'Enregistrer les modifications' : 'Créer la séance' ?>
             </button>
             <?php if ($editId): ?>
-            <a href="<?= url('student/course/view.php?id='.$editId.'&preview=1') ?>" target="_blank" class="btn btn-secondary">
+            <a href="<?= url('student/course/seance.php?id='.$editId.'&preview=1') ?>" target="_blank" class="btn btn-secondary">
               <i class="fas fa-eye"></i> Tester la séance
             </a>
             <?php endif; ?>
