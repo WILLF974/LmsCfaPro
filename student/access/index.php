@@ -7,9 +7,35 @@ if (!isStudent()) redirect(getDashboardUrl());
 $pdo    = getDB();
 $userId = (int)$_SESSION['user_id'];
 
-$grantsStmt = $pdo->prepare("SELECT * FROM access_grants WHERE user_id = ? AND revoked_at IS NULL ORDER BY granted_at DESC");
+// Accès individuels
+$grantsStmt = $pdo->prepare("SELECT *, NULL AS cohort_name FROM access_grants WHERE user_id = ? AND revoked_at IS NULL ORDER BY granted_at DESC");
 $grantsStmt->execute([$userId]);
 $grants = $grantsStmt->fetchAll();
+
+// Accès via cohortes (fusionnés dans la même liste, dédupliqués par scope_type+scope_id)
+try {
+    $cgStmt = $pdo->prepare("
+        SELECT cag.id, cag.scope_type, cag.scope_id, cag.granted_at, cag.notes,
+               co.name AS cohort_name
+        FROM cohort_access_grants cag
+        JOIN cohorts co ON cag.cohort_id = co.id
+        JOIN cohort_members cm ON cm.cohort_id = cag.cohort_id
+        WHERE cm.student_id = ? AND cag.revoked_at IS NULL
+        ORDER BY cag.granted_at DESC
+    ");
+    $cgStmt->execute([$userId]);
+    $seenScopes = [];
+    foreach ($grants as $g) {
+        $seenScopes[$g['scope_type'].':'.$g['scope_id']] = true;
+    }
+    foreach ($cgStmt->fetchAll() as $cg) {
+        $key = $cg['scope_type'].':'.$cg['scope_id'];
+        if (!isset($seenScopes[$key])) {
+            $grants[]         = $cg;
+            $seenScopes[$key] = true;
+        }
+    }
+} catch (\Exception $e) { /* table absente */ }
 
 $labelDefs = [
     'rncp_title'    => ['icon'=>'fa-certificate', 'color'=>'#8b5cf6', 'label'=>'Titre RNCP',    'sql'=>"SELECT CONCAT(rncp_code,' — ',title) FROM rncp_titles WHERE id=?"],
@@ -96,14 +122,15 @@ foreach ($grants as $g) {
     }
 
     $items[] = [
-        'scopeType'  => $g['scope_type'],
-        'scopeLabel' => $scopeLabel,
-        'icon'       => $def['icon'],
-        'color'      => $def['color'],
-        'levelLabel' => $def['label'],
-        'tree'       => $tree,
-        'total'      => count($modules),
-        'done'       => count(array_filter($modules, fn($m) => $m['progress_status'] === 'completed')),
+        'scopeType'   => $g['scope_type'],
+        'scopeLabel'  => $scopeLabel,
+        'icon'        => $def['icon'],
+        'color'       => $def['color'],
+        'levelLabel'  => $def['label'],
+        'cohortName'  => $g['cohort_name'] ?? null,
+        'tree'        => $tree,
+        'total'       => count($modules),
+        'done'        => count(array_filter($modules, fn($m) => $m['progress_status'] === 'completed')),
     ];
 }
 
@@ -144,6 +171,9 @@ renderTopbar('Accès complémentaires', [['Mon espace', url('student/index.php')
       <div style="flex:1;min-width:0">
         <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:<?= $item['color'] ?>;margin-bottom:2px"><?= $item['levelLabel'] ?></div>
         <div style="font-size:14px;font-weight:700;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><?= e($item['scopeLabel']) ?></div>
+        <?php if ($item['cohortName']): ?>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:2px"><i class="fas fa-users" style="font-size:9px;margin-right:3px"></i>Via cohorte : <?= e($item['cohortName']) ?></div>
+        <?php endif; ?>
       </div>
       <?php if ($scopeType !== 'module' && $item['total'] > 0): ?>
       <div style="font-size:12px;font-weight:700;color:<?= $item['done']===$item['total'] ? 'var(--success)' : 'var(--text-muted)' ?>;white-space:nowrap"><?= $item['done'] ?>/<?= $item['total'] ?> validées</div>
