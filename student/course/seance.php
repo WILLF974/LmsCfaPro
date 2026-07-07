@@ -183,13 +183,9 @@ renderTopbar($pageTitle, [
         </div>
       </div>
       <?php if (!$isCompleted && isStudent()): ?>
-      <form method="POST" style="flex-shrink:0">
-        <?= csrfField() ?>
-        <input type="hidden" name="action" value="complete">
-        <button type="submit" class="btn btn-primary">
-          <i class="fas fa-check"></i> Valider la séance
-        </button>
-      </form>
+      <button id="btn-complete" onclick="validateSeance(this)" class="btn btn-primary" style="flex-shrink:0">
+        <i class="fas fa-check"></i> Valider la séance
+      </button>
       <?php endif; ?>
     </div>
 
@@ -319,8 +315,73 @@ renderTopbar($pageTitle, [
 .rich-content a { color:var(--primary-light); }
 .rich-content blockquote { border-left:3px solid var(--primary-light); padding-left:12px; color:var(--text-muted); }
 #pdf-wrapper { position:relative }
+@keyframes xpPop { from { opacity:0;transform:scale(.7) translateY(20px); } to { opacity:1;transform:scale(1) translateY(0); } }
 </style>
+
+<!-- Popup XP -->
+<div id="xp-popup" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.75);align-items:center;justify-content:center;backdrop-filter:blur(6px)">
+  <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:20px;padding:40px 48px;text-align:center;max-width:420px;width:90%;animation:xpPop .35s cubic-bezier(.34,1.56,.64,1) both">
+    <div id="xp-icon" style="font-size:56px;margin-bottom:16px">🎉</div>
+    <h2 id="xp-title" style="font-size:22px;font-weight:800;color:white;margin-bottom:8px">Séance validée !</h2>
+    <p id="xp-subtitle" style="font-size:14px;color:var(--text-muted);margin-bottom:24px">Excellente progression, continuez ainsi !</p>
+    <div id="xp-badge" style="display:inline-flex;align-items:center;gap:10px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);border-radius:50px;padding:10px 24px;margin-bottom:28px">
+      <i class="fas fa-bolt" style="color:#f59e0b;font-size:20px"></i>
+      <span id="xp-amount" style="font-size:28px;font-weight:900;color:#f59e0b"></span>
+    </div>
+    <div id="levelup-banner" style="display:none;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);border-radius:12px;padding:12px 20px;margin-bottom:20px">
+      <i class="fas fa-arrow-up" style="color:var(--primary-light)"></i>
+      <span id="levelup-text" style="font-size:14px;font-weight:700;color:var(--primary-light);margin-left:6px"></span>
+    </div>
+    <button onclick="xpContinue()" class="btn btn-primary" style="width:100%;justify-content:center;padding:14px">
+      <i class="fas fa-arrow-right"></i> Continuer
+    </button>
+  </div>
+</div>
 <script>
+const MODULE_ID  = <?= (int)$moduleId ?>;
+const NEXT_URL   = <?= $nextSeance ? json_encode(url('student/course/seance.php?id='.$nextSeance['id'])) : 'null' ?>;
+
+async function validateSeance(btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Validation…'; }
+  try {
+    const res  = await fetch('<?= url('api/module_progress.php') ?>', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'complete', module_id: MODULE_ID })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Erreur');
+
+    if (!data.already_completed && data.xp > 0) {
+      document.getElementById('xp-icon').textContent    = NEXT_URL ? '🎉' : '🏆';
+      document.getElementById('xp-title').textContent   = NEXT_URL ? 'Séance validée !' : 'Bravo !';
+      document.getElementById('xp-subtitle').textContent = NEXT_URL
+        ? 'Excellente progression, continuez ainsi !'
+        : 'Vous avez terminé toutes les séances disponibles.';
+      document.getElementById('xp-amount').textContent  = '+' + data.xp + ' XP';
+      if (data.level_up) {
+        document.getElementById('levelup-banner').style.display = 'block';
+        document.getElementById('levelup-text').textContent = 'Niveau ' + data.new_level + ' atteint !';
+      }
+      document.getElementById('xp-popup').style.display = 'flex';
+    } else {
+      xpContinue();
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Valider la séance'; }
+    alert('Erreur lors de la validation. Veuillez réessayer.');
+  }
+}
+
+function xpContinue() {
+  document.getElementById('xp-popup').style.display = 'none';
+  window.location.href = NEXT_URL || window.location.pathname + window.location.search;
+}
+
+document.getElementById('xp-popup').addEventListener('click', function(e) {
+  if (e.target === this) xpContinue();
+});
+
 var _pdfFs = false;
 function togglePdfFullscreen() {
   var wrap = document.getElementById('pdf-wrapper');
