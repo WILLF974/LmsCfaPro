@@ -27,6 +27,38 @@ $grants = $grants->fetchAll();
 
 $students = $pdo->query("SELECT id, first_name, last_name FROM users WHERE role='student' AND status='active' ORDER BY last_name, first_name")->fetchAll();
 
+// ── Accès cohortes ─────────────────────────────────────────────────────────────
+$cohortGrants = [];
+try {
+    $cgStmt = $pdo->query("
+        SELECT cag.*, co.name AS cohort_name,
+               u.first_name AS gb_first, u.last_name AS gb_last,
+               (SELECT COUNT(*) FROM cohort_members cm WHERE cm.cohort_id = cag.cohort_id) AS member_count
+        FROM cohort_access_grants cag
+        JOIN cohorts co ON cag.cohort_id = co.id
+        LEFT JOIN users u ON cag.granted_by = u.id
+        WHERE cag.revoked_at IS NULL
+        ORDER BY co.name, cag.granted_at DESC
+    ");
+    $cohortGrants = $cgStmt->fetchAll();
+} catch (\Exception $e) {}
+
+// Résoudre les libellés pour les accès cohortes
+$cgScopeLabels = [];
+foreach ($cohortGrants as $cg) {
+    $k = $cg['scope_type'].':'.$cg['scope_id'];
+    if (isset($cgScopeLabels[$k])) continue;
+    switch ($cg['scope_type']) {
+        case 'rncp_title':    $r = $pdo->prepare("SELECT CONCAT(rncp_code,' — ',title) FROM rncp_titles WHERE id=?"); break;
+        case 'activity_type': $r = $pdo->prepare("SELECT CONCAT(code,' — ',title) FROM activity_types WHERE id=?"); break;
+        case 'competency':    $r = $pdo->prepare("SELECT CONCAT(code,' — ',title) FROM competencies WHERE id=?"); break;
+        case 'sequence':      $r = $pdo->prepare("SELECT title FROM sequences WHERE id=?"); break;
+        default:              $r = $pdo->prepare("SELECT title FROM modules WHERE id=?"); break;
+    }
+    $r->execute([$cg['scope_id']]);
+    $cgScopeLabels[$k] = $r->fetchColumn() ?: '#'.$cg['scope_id'];
+}
+
 // Résoudre les libellés de scope
 $scopeLabels = [];
 foreach ($grants as $g) {
@@ -156,5 +188,64 @@ renderTopbar('Accès aux ressources', [['Pédagogie', url('pedagogy/index.php')]
   </div>
   <div style="font-size:12px;color:var(--text-muted);margin-top:8px"><?= count($grants) ?> accès actif<?= count($grants)>1?'s':'' ?></div>
   <?php endif; ?>
+
+  <!-- ── Accès cohortes ── -->
+  <div style="margin-top:32px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <h2 style="font-size:15px;font-weight:800;margin:0;display:flex;align-items:center;gap:8px">
+        <i class="fas fa-users" style="color:#f59e0b"></i> Accès par cohorte
+        <span class="badge badge-secondary" style="font-size:10px"><?= count($cohortGrants) ?></span>
+      </h2>
+      <a href="<?= url('pedagogy/cohorts/index.php') ?>" class="btn btn-ghost btn-sm"><i class="fas fa-external-link-alt"></i> Gérer via les cohortes</a>
+    </div>
+
+    <?php if (empty($cohortGrants)): ?>
+    <div class="card" style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">
+      <i class="fas fa-users" style="font-size:24px;display:block;margin-bottom:6px;opacity:.25"></i>
+      Aucun accès accordé à une cohorte.
+    </div>
+    <?php else: ?>
+    <div class="card" style="overflow:hidden">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Cohorte</th>
+            <th>Niveau</th>
+            <th>Périmètre</th>
+            <th>Accordé par</th>
+            <th>Date</th>
+            <th style="width:60px"></th>
+          </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($cohortGrants as $cg):
+          $st  = $scopeColors[$cg['scope_type']] ?? ['color'=>'#64748b','bg'=>'rgba(100,116,139,.15)','label'=>$cg['scope_type'],'icon'=>'circle'];
+          $lbl = $cgScopeLabels[$cg['scope_type'].':'.$cg['scope_id']] ?? '—';
+        ?>
+        <tr>
+          <td>
+            <a href="<?= url('pedagogy/cohorts/view.php?id='.$cg['cohort_id']) ?>" style="font-weight:600;color:var(--primary-light);text-decoration:none"><?= e($cg['cohort_name']) ?></a>
+            <div style="font-size:10px;color:var(--text-muted)"><?= $cg['member_count'] ?> membre<?= $cg['member_count']>1?'s':'' ?></div>
+          </td>
+          <td>
+            <span style="display:inline-flex;align-items:center;gap:5px;background:<?= $st['bg'] ?>;color:<?= $st['color'] ?>;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700">
+              <i class="fas fa-<?= $st['icon'] ?>"></i> <?= $st['label'] ?>
+            </span>
+          </td>
+          <td style="max-width:240px;font-size:12px">
+            <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="<?= e($lbl) ?>"><?= e($lbl) ?></div>
+          </td>
+          <td style="font-size:12px;color:var(--text-secondary)"><?= $cg['gb_first'] ? e($cg['gb_first'].' '.$cg['gb_last']) : '—' ?></td>
+          <td style="font-size:12px;color:var(--text-muted)"><?= formatDate($cg['granted_at']) ?></td>
+          <td>
+            <a href="<?= url('pedagogy/cohorts/view.php?id='.$cg['cohort_id']) ?>" class="btn btn-ghost btn-sm" title="Gérer"><i class="fas fa-external-link-alt"></i></a>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php endif; ?>
+  </div>
 </div>
 <?php renderFooter(); ?>

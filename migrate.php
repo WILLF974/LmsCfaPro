@@ -191,6 +191,25 @@ $migrations = [
     ",
 
     // ── Migration 015 : Accès par périmètre pédagogique ────────────────────────
+    '017_create_cohort_access_grants' => "
+        CREATE TABLE IF NOT EXISTS `cohort_access_grants` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `cohort_id` INT UNSIGNED NOT NULL,
+          `scope_type` ENUM('rncp_title','activity_type','competency','sequence','module') NOT NULL,
+          `scope_id` INT UNSIGNED NOT NULL,
+          `granted_by` INT UNSIGNED DEFAULT NULL,
+          `granted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `revoked_at` DATETIME DEFAULT NULL,
+          `revoked_by` INT UNSIGNED DEFAULT NULL,
+          `notes` VARCHAR(255) DEFAULT NULL,
+          FOREIGN KEY (`cohort_id`) REFERENCES `cohorts`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`granted_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          FOREIGN KEY (`revoked_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+          UNIQUE KEY `unique_cohort_grant` (`cohort_id`, `scope_type`, `scope_id`),
+          INDEX `idx_cohort_active` (`cohort_id`, `revoked_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
     '016_add_is_published_seq' => "ALTER TABLE sequences ADD COLUMN IF NOT EXISTS is_published TINYINT(1) NOT NULL DEFAULT 1",
     '016_add_is_published_mod' => "ALTER TABLE modules ADD COLUMN IF NOT EXISTS is_published TINYINT(1) NOT NULL DEFAULT 1",
 

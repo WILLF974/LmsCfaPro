@@ -313,6 +313,21 @@ function hasContentAccess(int $userId, array $scope): bool {
         }
     } catch (\Exception $e) { /* table pas encore créée */ }
 
+    // 4. Vérification cohort_access_grants (l'utilisateur est dans une cohorte ayant l'accès)
+    try {
+        foreach ($pairs as [$type, $id]) {
+            $g = $pdo->prepare("
+                SELECT cag.id FROM cohort_access_grants cag
+                JOIN cohort_members cm ON cm.cohort_id = cag.cohort_id
+                WHERE cm.student_id = ? AND cag.scope_type = ? AND cag.scope_id = ?
+                  AND cag.revoked_at IS NULL
+                LIMIT 1
+            ");
+            $g->execute([$userId, $type, $id]);
+            if ($g->fetch()) return true;
+        }
+    } catch (\Exception $e) { /* table cohort_access_grants absente */ }
+
     return false;
 }
 
