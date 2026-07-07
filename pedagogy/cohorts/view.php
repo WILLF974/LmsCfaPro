@@ -387,7 +387,9 @@ renderTopbar('Cohorte', [
     </div>
     <?php endif; ?>
   </div>
-</div>
+
+<!-- ═══════════════ Section Accès aux ressources (dans page-content) ═══════════════ -->
+<?php // (section déplacée dans page-content pour héritage du padding/max-width) ?>
 
 <!-- Modal : Ajouter des apprenants -->
 <div id="modal-add" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1000;align-items:center;justify-content:center">
@@ -538,6 +540,7 @@ renderTopbar('Cohorte', [
   </div>
   <?php endif; ?>
 </div>
+</div><!-- /.page-content -->
 
 <!-- Modal : Donner un accès à la cohorte -->
 <div id="modal-access" style="display:none;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.6);align-items:center;justify-content:center;backdrop-filter:blur(4px)">
