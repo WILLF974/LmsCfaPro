@@ -228,7 +228,7 @@ renderTopbar($pageTitle, [
         }
       ?>
         <?php if ($pdfPages): ?>
-        <div id="pdf-wrapper" style="position:relative">
+        <div id="pdf-wrapper">
           <div id="pdf-container" style="height:600px">
             <iframe id="pdf-iframe" src="<?= e($pdfPages[0]) ?>" style="width:100%;height:100%;border:0" loading="lazy"></iframe>
           </div>
@@ -318,22 +318,29 @@ renderTopbar($pageTitle, [
 .rich-content ul,.rich-content ol { padding-left:1.5em; margin:0 0 .8em; }
 .rich-content a { color:var(--primary-light); }
 .rich-content blockquote { border-left:3px solid var(--primary-light); padding-left:12px; color:var(--text-muted); }
-#pdf-wrapper.is-fullscreen { position:fixed;inset:0;z-index:9999;background:#000;margin:0 }
-#pdf-wrapper.is-fullscreen #pdf-container { height:100vh }
-#pdf-wrapper.is-fullscreen #pdf-fs-btn { top:14px;right:14px }
+#pdf-wrapper { position:relative }
 </style>
 <script>
+var _pdfFs = false;
 function togglePdfFullscreen() {
   var wrap = document.getElementById('pdf-wrapper');
+  var cont = document.getElementById('pdf-container');
   var icon = document.getElementById('pdf-fs-icon');
-  var isFs = wrap.classList.toggle('is-fullscreen');
-  icon.className = isFs ? 'fas fa-compress' : 'fas fa-expand';
-  document.body.style.overflow = isFs ? 'hidden' : '';
+  _pdfFs = !_pdfFs;
+  if (_pdfFs) {
+    wrap.style.cssText  = 'position:fixed;inset:0;z-index:9999;background:#000;margin:0';
+    cont.style.height   = '100dvh';
+    icon.className      = 'fas fa-compress';
+    document.body.style.overflow = 'hidden';
+  } else {
+    wrap.style.cssText  = 'position:relative';
+    cont.style.height   = '600px';
+    icon.className      = 'fas fa-expand';
+    document.body.style.overflow = '';
+  }
 }
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape' && document.getElementById('pdf-wrapper').classList.contains('is-fullscreen')) {
-    togglePdfFullscreen();
-  }
+  if (e.key === 'Escape' && _pdfFs) togglePdfFullscreen();
 });
 </script>
 <?php renderFooter(); ?>
