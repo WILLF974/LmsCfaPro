@@ -228,8 +228,15 @@ renderTopbar($pageTitle, [
         }
       ?>
         <?php if ($pdfPages): ?>
-        <div style="height:600px">
-          <iframe src="<?= e($pdfPages[0]) ?>" style="width:100%;height:100%;border:0" loading="lazy"></iframe>
+        <div id="pdf-wrapper" style="position:relative">
+          <div id="pdf-container" style="height:600px">
+            <iframe id="pdf-iframe" src="<?= e($pdfPages[0]) ?>" style="width:100%;height:100%;border:0" loading="lazy"></iframe>
+          </div>
+          <button onclick="togglePdfFullscreen()" id="pdf-fs-btn"
+            style="position:absolute;top:10px;right:10px;z-index:10;background:rgba(0,0,0,.55);border:none;border-radius:6px;padding:6px 10px;cursor:pointer;color:#fff;font-size:13px;display:flex;align-items:center;gap:6px;backdrop-filter:blur(4px)"
+            title="Plein écran">
+            <i class="fas fa-expand" id="pdf-fs-icon"></i>
+          </button>
         </div>
         <?php if (count($pdfPages) > 1): ?>
         <div style="padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border-color)">
@@ -311,5 +318,22 @@ renderTopbar($pageTitle, [
 .rich-content ul,.rich-content ol { padding-left:1.5em; margin:0 0 .8em; }
 .rich-content a { color:var(--primary-light); }
 .rich-content blockquote { border-left:3px solid var(--primary-light); padding-left:12px; color:var(--text-muted); }
+#pdf-wrapper.is-fullscreen { position:fixed;inset:0;z-index:9999;background:#000;margin:0 }
+#pdf-wrapper.is-fullscreen #pdf-container { height:100vh }
+#pdf-wrapper.is-fullscreen #pdf-fs-btn { top:14px;right:14px }
 </style>
+<script>
+function togglePdfFullscreen() {
+  var wrap = document.getElementById('pdf-wrapper');
+  var icon = document.getElementById('pdf-fs-icon');
+  var isFs = wrap.classList.toggle('is-fullscreen');
+  icon.className = isFs ? 'fas fa-compress' : 'fas fa-expand';
+  document.body.style.overflow = isFs ? 'hidden' : '';
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && document.getElementById('pdf-wrapper').classList.contains('is-fullscreen')) {
+    togglePdfFullscreen();
+  }
+});
+</script>
 <?php renderFooter(); ?>
