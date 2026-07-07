@@ -154,6 +154,9 @@ function renderSidebar(string $role): void {
     <a href="<?= url('student/formations/index.php') ?>" class="nav-link <?= currentUrlContains('/student/formations') ? 'active' : '' ?>">
       <i class="fas fa-graduation-cap"></i> Mes formations
     </a>
+    <a href="<?= url('student/access/index.php') ?>" class="nav-link <?= currentUrlContains('/student/access') ? 'active' : '' ?>">
+      <i class="fas fa-key"></i> Accès complémentaires
+    </a>
     <a href="<?= url('student/badges/index.php') ?>" class="nav-link <?= currentUrlContains('/badges') ? 'active' : '' ?>">
       <i class="fas fa-trophy"></i> Badges & XP
     </a>
