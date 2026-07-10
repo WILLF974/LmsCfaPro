@@ -67,7 +67,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (?,?,?,?,?,?,?,?,?)
             ")->execute([$cohortId, $title, $instructions, $date, $timeStart ?: null, $timeEnd ?: null, $seqId, $modId, $viewerId]);
             auditLog('agenda_entry_created', 'cohort', $cohortId);
-            setFlash('success', 'Séance ajoutée au cahier de texte.');
+            setFlash('success', 'Note ajoutée au cahier de texte.');
+
+            // ── Notifier les apprenants de la cohorte ────────────────────────
+            $members = $pdo->prepare("
+                SELECT u.email, u.first_name, u.last_name
+                FROM cohort_members cm
+                JOIN users u ON u.id = cm.student_id
+                WHERE cm.cohort_id = ? AND u.email IS NOT NULL AND u.email != ''
+            ");
+            $members->execute([$cohortId]);
+            $siteName = getSetting('site_name', 'LMS CFA Pro');
+            $dateFormatted = date('d/m/Y', strtotime($date));
+            $timeLabel = ($timeStart ? ' à ' . substr($timeStart, 0, 5) : '') . ($timeEnd ? ' – ' . substr($timeEnd, 0, 5) : '');
+
+            foreach ($members->fetchAll() as $m) {
+                $prenom = e($m['first_name'] ?? '');
+                $htmlBody = <<<HTML
+<div style="font-family:Arial,sans-serif;max-width:540px;margin:0 auto;background:#f8fafc;padding:32px;border-radius:8px">
+  <div style="background:#6366f1;border-radius:8px 8px 0 0;padding:24px;text-align:center">
+    <h1 style="color:white;margin:0;font-size:20px">{$siteName}</h1>
+    <p style="color:rgba(255,255,255,.8);margin:6px 0 0;font-size:13px">Cahier de texte — {$cohort['name']}</p>
+  </div>
+  <div style="background:white;border-radius:0 0 8px 8px;padding:28px">
+    <p style="color:#1e293b;font-size:15px">Bonjour {$prenom},</p>
+    <p style="color:#475569">Une nouvelle note a été ajoutée à votre cahier de texte :</p>
+    <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:18px;margin:20px 0">
+      <div style="font-size:16px;font-weight:700;color:#312e81;margin-bottom:6px">{$title}</div>
+      <div style="font-size:13px;color:#4338ca"><i>📅 {$dateFormatted}{$timeLabel}</i></div>
+HTML;
+                if ($instructions) {
+                    $htmlBody .= '<p style="color:#475569;font-size:13px;margin-top:12px;border-top:1px solid #e0e7ff;padding-top:10px">' . nl2br(htmlspecialchars($instructions)) . '</p>';
+                }
+                $htmlBody .= <<<HTML
+    </div>
+    <p style="color:#94a3b8;font-size:12px;margin-top:24px">
+      Connectez-vous sur <a href="https://lmscfapro.fr" style="color:#6366f1">lmscfapro.fr</a> pour consulter le détail.
+    </p>
+  </div>
+</div>
+HTML;
+                sendEmail($m['email'], "Nouvelle note au cahier de texte — {$cohort['name']}", $htmlBody);
+            }
         } else {
             setFlash('error', 'Le titre et la date sont obligatoires.');
         }
@@ -92,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     WHERE id=? AND cohort_id=?
                 ")->execute([$title, $instructions, $date, $timeStart ?: null, $timeEnd ?: null, $seqId, $modId, $viewerId, $entryId, $cohortId]);
                 auditLog('agenda_entry_updated', 'cohort', $cohortId);
-                setFlash('success', 'Séance mise à jour.');
+                setFlash('success', 'Note mise à jour.');
             } else {
                 setFlash('error', 'Vous ne pouvez modifier que vos propres entrées.');
             }
@@ -107,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($owner !== false && ($canEditAll || (int)$owner === $viewerId)) {
                 $pdo->prepare("DELETE FROM agenda_entries WHERE id=? AND cohort_id=?")->execute([$entryId, $cohortId]);
                 auditLog('agenda_entry_deleted', 'cohort', $cohortId);
-                setFlash('success', 'Séance supprimée.');
+                setFlash('success', 'Note supprimée.');
             } else {
                 setFlash('error', 'Vous ne pouvez supprimer que vos propres entrées.');
             }
@@ -198,7 +239,7 @@ renderTopbar('Cahier de texte', $breadcrumbs);
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0">
           <button class="btn btn-primary btn-sm" onclick="openEntryModal()">
-            <i class="fas fa-plus"></i> Ajouter une séance
+            <i class="fas fa-plus"></i> Ajouter une note
           </button>
           <a href="<?= $cohortViewUrl ?>" class="btn btn-ghost btn-sm"><i class="fas fa-arrow-left"></i> Retour</a>
         </div>
@@ -229,7 +270,7 @@ renderTopbar('Cahier de texte', $breadcrumbs);
             $isToday = ($d === $todayDay);
           ?>
           <a href="<?= $count ? '#day-'.$d : '#' ?>"
-             title="<?= $count ? $count.' séance(s)' : '' ?>"
+             title="<?= $count ? $count.' note(s)' : '' ?>"
              style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:30px;border-radius:6px;text-decoration:none;
                     background:<?= $isToday?'var(--primary)':($count?'rgba(99,102,241,.15)':'transparent') ?>;
                     border:1px solid <?= $isToday?'var(--primary)':($count?'rgba(99,102,241,.35)':'transparent') ?>;
@@ -242,7 +283,7 @@ renderTopbar('Cahier de texte', $breadcrumbs);
         </div>
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:10px;color:var(--text-faint);display:flex;flex-direction:column;gap:4px">
           <div style="display:flex;align-items:center;gap:5px"><div style="width:8px;height:8px;border-radius:2px;background:var(--primary);flex-shrink:0"></div>Aujourd'hui</div>
-          <div style="display:flex;align-items:center;gap:5px"><div style="width:8px;height:8px;border-radius:2px;background:rgba(99,102,241,.2);border:1px solid rgba(99,102,241,.4);flex-shrink:0"></div>Séance programmée</div>
+          <div style="display:flex;align-items:center;gap:5px"><div style="width:8px;height:8px;border-radius:2px;background:rgba(99,102,241,.2);border:1px solid rgba(99,102,241,.4);flex-shrink:0"></div>Note programmée</div>
         </div>
       </div>
     </div>
@@ -253,9 +294,9 @@ renderTopbar('Cahier de texte', $breadcrumbs);
       <div class="card">
         <div class="empty-state" style="padding:48px">
           <div class="icon"><i class="fas fa-calendar-alt"></i></div>
-          <h3>Aucune séance ce mois</h3>
-          <p>Programmez des séances pour cette cohorte.</p>
-          <button class="btn btn-primary" onclick="openEntryModal()"><i class="fas fa-plus"></i> Ajouter une séance</button>
+          <h3>Aucune note ce mois</h3>
+          <p>Ajoutez des notes pour cette cohorte.</p>
+          <button class="btn btn-primary" onclick="openEntryModal()"><i class="fas fa-plus"></i> Ajouter une note</button>
         </div>
       </div>
       <?php else:
@@ -273,7 +314,7 @@ renderTopbar('Cahier de texte', $breadcrumbs);
           <div style="display:flex;align-items:center;gap:8px;white-space:nowrap">
             <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:<?= $isToday2?'var(--primary-light)':'var(--text-muted)' ?>"><?= $dayLabel ?></span>
             <?php if ($isToday2): ?><span class="badge badge-primary" style="font-size:9px">Aujourd'hui</span><?php endif; ?>
-            <span class="badge badge-secondary" style="font-size:9px"><?= count($dayEntries) ?> séance<?= count($dayEntries)>1?'s':'' ?></span>
+            <span class="badge badge-secondary" style="font-size:9px"><?= count($dayEntries) ?> note<?= count($dayEntries)>1?'s':'' ?></span>
           </div>
           <div style="flex:1;height:1px;background:var(--border)"></div>
         </div>
@@ -360,7 +401,7 @@ renderTopbar('Cahier de texte', $breadcrumbs);
                     ]), ENT_QUOTES) ?>)'>
                     <i class="fas fa-edit" style="color:var(--primary-light)"></i>
                   </button>
-                  <form method="POST" onsubmit="return confirm('Supprimer cette séance ?')">
+                  <form method="POST" onsubmit="return confirm('Supprimer cette note ?')">
                     <?= csrfField() ?>
                     <input type="hidden" name="action"   value="delete_entry">
                     <input type="hidden" name="entry_id" value="<?= $e['id'] ?>">
@@ -379,11 +420,11 @@ renderTopbar('Cahier de texte', $breadcrumbs);
   </div>
 </div>
 
-<!-- Modal : Ajouter / Modifier une séance -->
+<!-- Modal : Ajouter / Modifier une note -->
 <div id="modal-entry" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:1000;align-items:center;justify-content:center">
   <div class="card" style="width:640px;max-width:95vw;max-height:93vh;display:flex;flex-direction:column">
     <div class="card-header" style="flex-shrink:0">
-      <h3 class="card-title" id="modal-entry-title"><i class="fas fa-plus" style="color:var(--primary-light)"></i> Ajouter une séance</h3>
+      <h3 class="card-title" id="modal-entry-title"><i class="fas fa-plus" style="color:var(--primary-light)"></i> Ajouter une note</h3>
       <button onclick="closeEntryModal()" class="btn-icon"><i class="fas fa-times"></i></button>
     </div>
     <div class="card-body" style="flex:1;overflow-y:auto;padding:16px 20px">
@@ -409,7 +450,7 @@ renderTopbar('Cahier de texte', $breadcrumbs);
         </div>
 
         <div class="form-group">
-          <label class="form-label">Titre de la séance <span class="required">*</span></label>
+          <label class="form-label">Titre de la note <span class="required">*</span></label>
           <input type="text" name="title" id="entry-title-input" class="form-control" required
             placeholder="Ex : Révision C1.1 — Analyse des flux financiers">
         </div>
@@ -417,7 +458,7 @@ renderTopbar('Cahier de texte', $breadcrumbs);
         <div class="form-group">
           <label class="form-label">Consignes / Travail à réaliser</label>
           <textarea name="instructions" id="entry-instructions" class="form-control" rows="4"
-            placeholder="Décrivez le contenu de la séance, les ressources à utiliser, les livrables attendus…"></textarea>
+            placeholder="Décrivez le contenu de la note, les ressources à utiliser, les livrables attendus…"></textarea>
         </div>
 
         <!-- Cascade RNCP (optionnel) -->
@@ -555,8 +596,8 @@ function _rncpFromSeq(seqId) {
 function openEntryModal(entry) {
   const isEdit = !!entry;
   document.getElementById('modal-entry-title').innerHTML = isEdit
-    ? '<i class="fas fa-edit" style="color:var(--primary-light)"></i> Modifier la séance'
-    : '<i class="fas fa-plus" style="color:var(--primary-light)"></i> Ajouter une séance';
+    ? '<i class="fas fa-edit" style="color:var(--primary-light)"></i> Modifier la note'
+    : '<i class="fas fa-plus" style="color:var(--primary-light)"></i> Ajouter une note';
   document.getElementById('entry-action').value       = isEdit ? 'edit_entry' : 'add_entry';
   document.getElementById('entry-id').value           = isEdit ? entry.id     : '';
   document.getElementById('entry-date').value         = isEdit ? entry.scheduled_date : _defaultDate;

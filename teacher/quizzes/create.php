@@ -9,6 +9,22 @@ $errors = [];
 
 $formations = $pdo->query("SELECT id, title FROM formations WHERE status='active' ORDER BY title")->fetchAll();
 
+// Module/séance pré-lié (venant de seance_create.php après redirection)
+$linkedModuleId    = (int)($_GET['module_id'] ?? 0);
+$linkedSeanceTitle = trim($_GET['seance_title'] ?? '');
+
+// Toutes les séances de type quiz (pour sélecteur "Associer à une séance")
+$quizSeances = $pdo->query("
+    SELECT m.id, m.title AS seance_title,
+           s.title AS seq_title, c.code AS comp_code, at.code AS at_code
+    FROM modules m
+    LEFT JOIN sequences s    ON m.sequence_id = s.id
+    LEFT JOIN competencies c  ON s.competency_id = c.id
+    LEFT JOIN activity_types at ON c.activity_type_id = at.id
+    WHERE m.content_type = 'quiz'
+    ORDER BY at.code, c.code, s.title, m.order_num
+")->fetchAll();
+
 // ── Mode édition ─────────────────────────────────────────────
 $editId = (int)($_GET['id'] ?? 0);
 $editQuiz = null;
@@ -44,8 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'formation_id'         => (int)($_POST['formation_id'] ?? 0) ?: null,
         'activity_type_id'     => (int)($_POST['activity_type_id'] ?? 0) ?: null,
         'competency_id'        => (int)($_POST['competency_id'] ?? 0) ?: null,
-        'module_id'            => (int)($_POST['module_id'] ?? 0) ?: null,
-        'lesson_id'            => (int)($_POST['lesson_id'] ?? 0) ?: null,
+        'module_id'            => (int)($_POST['seance_module_id'] ?? $_POST['module_id'] ?? 0) ?: null,
         'passing_score'        => (int)($_POST['passing_score'] ?? 70),
         'max_attempts'         => (int)($_POST['max_attempts'] ?? 3),
         'time_limit_minutes'   => (int)($_POST['time_limit_minutes'] ?? 0) ?: null,
@@ -81,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($questions)) $errors[] = 'Ajoutez au moins une question.';
 
     if (empty($errors)) {
-        $vals = [$quiz['lesson_id'],$quiz['module_id'],$quiz['formation_id'],$quiz['activity_type_id'],$quiz['competency_id'],$quiz['title'],$quiz['description'],$quiz['instructions'],$quiz['quiz_type'],$quiz['passing_score'],$quiz['max_attempts'],$quiz['time_limit_minutes'],$quiz['shuffle_questions'],$quiz['shuffle_answers'],$quiz['show_results'],$quiz['show_correct_answers'],$quiz['xp_reward']];
+        $vals = [$quiz['module_id'],$quiz['formation_id'],$quiz['activity_type_id'],$quiz['competency_id'],$quiz['title'],$quiz['description'],$quiz['instructions'],$quiz['quiz_type'],$quiz['passing_score'],$quiz['max_attempts'],$quiz['time_limit_minutes'],$quiz['shuffle_questions'],$quiz['shuffle_answers'],$quiz['show_results'],$quiz['show_correct_answers'],$quiz['xp_reward']];
 
         if ($postEditId) {
             // Vérifier propriété
@@ -89,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $check->execute([$postEditId, $userId]);
             if (!$check->fetch()) { setFlash('error', 'Accès refusé.'); redirect(url('teacher/quizzes/index.php')); }
 
-            $pdo->prepare("UPDATE quizzes SET lesson_id=?,module_id=?,formation_id=?,activity_type_id=?,competency_id=?,title=?,description=?,instructions=?,quiz_type=?,passing_score=?,max_attempts=?,time_limit_minutes=?,shuffle_questions=?,shuffle_answers=?,show_results=?,show_correct_answers=?,xp_reward=? WHERE id=?")
+            $pdo->prepare("UPDATE quizzes SET module_id=?,formation_id=?,activity_type_id=?,competency_id=?,title=?,description=?,instructions=?,quiz_type=?,passing_score=?,max_attempts=?,time_limit_minutes=?,shuffle_questions=?,shuffle_answers=?,show_results=?,show_correct_answers=?,xp_reward=? WHERE id=?")
                 ->execute(array_merge($vals, [$postEditId]));
 
             // Recréer les questions
@@ -104,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             auditLog('quiz_updated', 'quiz', $postEditId);
             setFlash('success', 'Quiz mis à jour avec ' . count($questions) . ' questions !');
         } else {
-            $pdo->prepare("INSERT INTO quizzes (lesson_id,module_id,formation_id,activity_type_id,competency_id,title,description,instructions,quiz_type,passing_score,max_attempts,time_limit_minutes,shuffle_questions,shuffle_answers,show_results,show_correct_answers,xp_reward,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+            $pdo->prepare("INSERT INTO quizzes (module_id,formation_id,activity_type_id,competency_id,title,description,instructions,quiz_type,passing_score,max_attempts,time_limit_minutes,shuffle_questions,shuffle_answers,show_results,show_correct_answers,xp_reward,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
                 ->execute(array_merge($vals, [$userId]));
             $quizId = (int)$pdo->lastInsertId();
             foreach ($questions as $q) {
@@ -148,11 +163,37 @@ renderTopbar($pageTitle, [['Enseignant', url('teacher/index.php')], ['Quiz', url
       </button>
     </div>
   </div>
+  <?php else: ?>
+  <!-- Bannière mode modification -->
+  <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:var(--radius-xl);padding:14px 20px;margin-bottom:20px;display:flex;align-items:center;gap:14px">
+    <div style="width:38px;height:38px;border-radius:10px;background:rgba(245,158,11,.18);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+      <i class="fas fa-edit" style="color:var(--warning);font-size:16px"></i>
+    </div>
+    <div style="flex:1">
+      <div style="font-weight:700;color:white;font-size:13px;margin-bottom:2px">Mode modification</div>
+      <div style="font-size:12px;color:var(--text-muted)">Enregistrez vos modifications, puis testez le quiz pour vérifier le rendu et les corrections.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button type="button" onclick="openImportModal()" class="btn btn-ghost btn-sm" title="Remplacer les questions depuis un JSON IA">
+        <i class="fas fa-file-import"></i> Import IA
+      </button>
+      <a href="<?= url('teacher/quizzes/preview.php?id=' . $editQuiz['id']) ?>" class="btn btn-secondary" target="_blank">
+        <i class="fas fa-play-circle"></i> Tester le quiz
+      </a>
+    </div>
+  </div>
   <?php endif; ?>
 
   <form method="POST" id="quiz-form">
     <?= csrfField() ?>
     <?php if ($isEdit): ?><input type="hidden" name="edit_id" value="<?= $editQuiz['id'] ?>"><?php endif; ?>
+    <?php if (!$isEdit && $linkedModuleId): ?>
+    <input type="hidden" name="module_id" id="preset-module-id" value="<?= $linkedModuleId ?>">
+    <div style="background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:10px">
+      <i class="fas fa-link" style="color:#a78bfa"></i>
+      Ce quiz sera automatiquement lié à la séance <strong style="color:white"><?= $linkedSeanceTitle ? e($linkedSeanceTitle) : 'sélectionnée' ?></strong>.
+    </div>
+    <?php endif; ?>
     <div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start">
 
       <div style="display:flex;flex-direction:column;gap:20px">
@@ -163,7 +204,7 @@ renderTopbar($pageTitle, [['Enseignant', url('teacher/index.php')], ['Quiz', url
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Titre <span class="required">*</span></label>
-                <input type="text" name="title" class="form-control" placeholder="Ex: Quiz Module 1..." required value="<?= $isEdit ? e($editQuiz['title']) : '' ?>">
+                <input type="text" name="title" class="form-control" placeholder="Ex: Quiz Module 1..." required value="<?= $isEdit ? e($editQuiz['title']) : e($linkedSeanceTitle) ?>">
               </div>
               <div class="form-group">
                 <label class="form-label">Type</label>
@@ -192,7 +233,7 @@ renderTopbar($pageTitle, [['Enseignant', url('teacher/index.php')], ['Quiz', url
               </div>
               <div class="form-group">
                 <label class="form-label">Module</label>
-                <select name="module_id" id="quiz-module" class="form-control">
+                <select name="<?= (!$isEdit && $linkedModuleId) ? '_module_cascade' : 'module_id' ?>" id="quiz-module" class="form-control">
                   <option value="">-- Tous les modules --</option>
                 </select>
               </div>
@@ -207,6 +248,21 @@ renderTopbar($pageTitle, [['Enseignant', url('teacher/index.php')], ['Quiz', url
               <label class="form-label">Instructions</label>
               <textarea name="instructions" class="form-control" rows="2" placeholder="Instructions pour les apprenants..."><?= $isEdit ? e($editQuiz['instructions'] ?? '') : '' ?></textarea>
             </div>
+            <?php if (!$linkedModuleId && $quizSeances): ?>
+            <div class="form-group">
+              <label class="form-label">Séance associée <span style="font-weight:400;color:var(--text-muted)">(optionnel)</span></label>
+              <select name="seance_module_id" id="seance-module-select" class="form-control">
+                <option value="">-- Aucune séance liée --</option>
+                <?php foreach ($quizSeances as $sm): ?>
+                <option value="<?= $sm['id'] ?>"
+                  <?= ($isEdit && (int)$editQuiz['module_id'] === $sm['id']) ? 'selected' : '' ?>>
+                  <?= $sm['at_code'] ? e($sm['at_code']) . ' › ' : '' ?><?= $sm['comp_code'] ? e($sm['comp_code']) . ' › ' : '' ?><?= e($sm['seance_title']) ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Lie ce quiz à une séance de type Quiz dans la hiérarchie RNCP.</div>
+            </div>
+            <?php endif; ?>
           </div>
         </div>
 
@@ -270,6 +326,11 @@ renderTopbar($pageTitle, [['Enseignant', url('teacher/index.php')], ['Quiz', url
               <i class="fas fa-save"></i> <?= $isEdit ? 'Enregistrer les modifications' : 'Créer le quiz' ?>
             </button>
             <a href="<?= url('teacher/quizzes/index.php') ?>" class="btn btn-ghost w-full" style="justify-content:center">Annuler</a>
+            <?php if ($isEdit): ?>
+            <a href="<?= url('teacher/quizzes/preview.php?id=' . $editQuiz['id']) ?>" class="btn btn-ghost w-full" style="justify-content:center;color:var(--warning)" target="_blank">
+              <i class="fas fa-play-circle"></i> Tester le quiz
+            </a>
+            <?php endif; ?>
             <?php if ($isEdit): ?>
             <hr style="border-color:var(--border);margin:4px 0">
             <form method="POST" action="<?= url('teacher/quizzes/delete.php') ?>" onsubmit="return confirm('Supprimer définitivement ce quiz et toutes ses données ? Cette action est irréversible.')">

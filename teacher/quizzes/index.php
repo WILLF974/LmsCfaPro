@@ -17,8 +17,8 @@ $compId      = (int)($_GET['competency_id'] ?? 0);
 $page        = max(1, (int)($_GET['page']   ?? 1));
 
 // ── WHERE dynamique ───────────────────────────────────────────────────────────
-$where  = ['q.created_by = ?'];
-$params = [$userId];
+$where  = ['1=1'];
+$params = [];
 
 if ($search)      { $where[] = 'q.title LIKE ?';           $params[] = '%' . $search . '%'; }
 if ($qtype)       { $where[] = 'q.quiz_type = ?';          $params[] = $qtype; }
@@ -45,7 +45,6 @@ $stmt = $pdo->prepare("
            f.title AS formation_title, f.rncp_title_id,
            rt.rncp_code,
            m.title AS module_title,
-           l.title AS lesson_title,
            at.code AS at_code, at.title AS at_title,
            co.code AS co_code, co.title AS co_title,
            (SELECT COUNT(*) FROM quiz_questions qq WHERE qq.quiz_id = q.id) AS question_count,
@@ -55,7 +54,6 @@ $stmt = $pdo->prepare("
     LEFT JOIN formations f ON q.formation_id = f.id
     LEFT JOIN rncp_titles rt ON f.rncp_title_id = rt.id
     LEFT JOIN modules m ON q.module_id = m.id
-    LEFT JOIN lessons l ON q.lesson_id = l.id
     LEFT JOIN activity_types at ON q.activity_type_id = at.id
     LEFT JOIN competencies co ON q.competency_id = co.id
     WHERE $ws
@@ -67,23 +65,20 @@ $quizzes = $stmt->fetchAll();
 
 // ── Données pour les dropdowns filtres ───────────────────────────────────────
 
-// RNCPs qui ont des quizzes de cet enseignant
+// RNCPs qui ont des quizzes
 $filterRncpsStmt = $pdo->prepare("
     SELECT DISTINCT rt.id, rt.rncp_code, rt.title
     FROM rncp_titles rt
     JOIN formations f ON f.rncp_title_id = rt.id
     JOIN quizzes q ON q.formation_id = f.id
-    WHERE q.created_by = ?
     ORDER BY rt.rncp_code
 ");
-$filterRncpsStmt->execute([$userId]);
+$filterRncpsStmt->execute();
 $filterRncps = $filterRncpsStmt->fetchAll();
 
 // Formations (filtrées par RNCP si sélectionné)
-$fSql    = "SELECT DISTINCT f.id, f.title FROM formations f
-            JOIN quizzes q ON q.formation_id = f.id
-            WHERE q.created_by = ?";
-$fParams = [$userId];
+$fSql    = "SELECT DISTINCT f.id, f.title FROM formations f JOIN quizzes q ON q.formation_id = f.id WHERE 1=1";
+$fParams = [];
 if ($rncpId) { $fSql .= " AND f.rncp_title_id = ?"; $fParams[] = $rncpId; }
 $fSql .= " ORDER BY f.title";
 $filterFormationsStmt = $pdo->prepare($fSql);
@@ -96,10 +91,10 @@ if ($formationId) {
     $s = $pdo->prepare("
         SELECT DISTINCT m.id, m.title FROM modules m
         JOIN quizzes q ON q.module_id = m.id
-        WHERE q.formation_id = ? AND q.created_by = ?
+        WHERE q.formation_id = ?
         ORDER BY m.order_num, m.title
     ");
-    $s->execute([$formationId, $userId]);
+    $s->execute([$formationId]);
     $filterModules = $s->fetchAll();
 }
 
@@ -422,9 +417,12 @@ renderTopbar('Quiz & Évaluations', [['Enseignant', url('teacher/index.php')], [
         </div>
 
         <!-- Actions -->
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:6px;margin-bottom:6px">
           <a href="<?= url('teacher/quizzes/create.php?id=' . $quiz['id']) ?>" class="btn btn-secondary btn-sm" style="flex:1;justify-content:center"><i class="fas fa-edit"></i> Modifier</a>
-          <a href="<?= url('teacher/evaluations/index.php?quiz_id=' . $quiz['id']) ?>" class="btn btn-ghost btn-sm" title="Voir les résultats"><i class="fas fa-chart-bar"></i></a>
+          <a href="<?= url('teacher/quizzes/preview.php?id=' . $quiz['id']) ?>" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;color:var(--warning);border:1px solid rgba(245,158,11,.3)" target="_blank"><i class="fas fa-play-circle"></i> Tester</a>
+        </div>
+        <div style="display:flex;gap:6px">
+          <a href="<?= url('teacher/evaluations/index.php?quiz_id=' . $quiz['id']) ?>" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" title="Voir les résultats"><i class="fas fa-chart-bar"></i> Résultats</a>
           <form method="POST" action="<?= url('teacher/quizzes/delete.php') ?>" onsubmit="return confirm('Supprimer définitivement le quiz « <?= e(addslashes($quiz['title'])) ?> » et toutes ses données ?')">
             <?= csrfField() ?>
             <input type="hidden" name="quiz_id" value="<?= $quiz['id'] ?>">

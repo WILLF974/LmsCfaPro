@@ -35,7 +35,7 @@ renderTopbar('Cahier de texte', [['Cahier de texte', '']]);
   <div class="page-header">
     <div>
       <h1><i class="fas fa-book-open" style="color:var(--primary-light);margin-right:10px"></i>Cahier de texte</h1>
-      <p>Programmez et consultez les séances par cohorte</p>
+      <p>Ajoutez et consultez les notes par cohorte</p>
     </div>
   </div>
 
@@ -74,16 +74,16 @@ renderTopbar('Cahier de texte', [['Cahier de texte', '']]);
           <span><i class="fas fa-users" style="color:var(--primary-light)"></i> <?= $c['member_count'] ?> apprenant<?= $c['member_count']!=1?'s':'' ?></span>
           <span><i class="fas fa-calendar-check" style="color:var(--success)"></i>
             <?php if ($c['entries_this_month'] > 0): ?>
-            <strong style="color:var(--success)"><?= $c['entries_this_month'] ?></strong> séance<?= $c['entries_this_month']!=1?'s':'' ?> ce mois
+            <strong style="color:var(--success)"><?= $c['entries_this_month'] ?></strong> note<?= $c['entries_this_month']!=1?'s':'' ?> ce mois
             <?php else: ?>
-            Aucune séance ce mois
+            Aucune note ce mois
             <?php endif; ?>
           </span>
         </div>
 
         <?php if ($hasActivity): ?>
         <div style="font-size:11px;color:var(--text-faint);margin-bottom:12px">
-          <i class="fas fa-clock"></i> Dernière séance : <?= formatDate($c['last_entry_date']) ?>
+          <i class="fas fa-clock"></i> Dernière note : <?= formatDate($c['last_entry_date']) ?>
         </div>
         <?php endif; ?>
 

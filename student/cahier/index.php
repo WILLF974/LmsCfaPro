@@ -99,7 +99,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ")->execute([$userId, $title, $instructions, $date, $timeStart ?: null, $timeEnd ?: null, $seqId, $modId, $viewerId]);
             auditLog('student_agenda_entry_created', 'student', $userId);
-            setFlash('success', 'Entrée ajoutée au cahier de texte.');
+            // Notification email si ajout par un tiers (pas l'apprenant lui-même)
+            $emailSent = false;
+            if (!$isOwnView && !empty($student['email'])) {
+                $prenom = e($student['first_name'] ?? '');
+                $siteName = getSetting('site_name', 'LMS CFA Pro');
+                $dateFormatted = date('d/m/Y', strtotime($date));
+                $timeLabel = ($timeStart ? ' à ' . substr($timeStart, 0, 5) : '') . ($timeEnd ? ' – ' . substr($timeEnd, 0, 5) : '');
+                $htmlBody = "<p>Bonjour {$prenom},</p>"
+                    . "<p>Une nouvelle note a été ajoutée à votre cahier de texte :</p>"
+                    . "<table cellpadding='8' style='border-collapse:collapse'>"
+                    . "<tr><td><strong>Note :</strong></td><td>" . e($title) . "</td></tr>"
+                    . "<tr><td><strong>Date :</strong></td><td>{$dateFormatted}{$timeLabel}</td></tr>"
+                    . ($instructions ? "<tr><td><strong>Instructions :</strong></td><td>" . nl2br(e($instructions)) . "</td></tr>" : "")
+                    . "</table>"
+                    . "<p>Connectez-vous à la plateforme pour consulter votre cahier de texte.</p>"
+                    . "<p>— {$siteName}</p>";
+                ob_start();
+                $emailSent = sendEmail($student['email'], "Nouvelle note dans votre cahier de texte", $htmlBody);
+                ob_end_clean();
+            }
+            $msg = 'Entrée ajoutée au cahier de texte.';
+            if ($emailSent) $msg .= ' Un email de notification a été envoyé à l\'apprenant.';
+            setFlash('success', $msg);
         } else {
             setFlash('error', 'Le titre et la date sont obligatoires.');
         }
@@ -307,7 +329,7 @@ renderTopbar($pageTitle, $isOwnView
         </div>
         <!-- Légende -->
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:10px;color:var(--text-faint);display:flex;flex-direction:column;gap:4px">
-          <div style="display:flex;align-items:center;gap:5px"><div style="width:8px;height:8px;border-radius:2px;background:var(--primary);flex-shrink:0"></div>Séance de cohorte</div>
+          <div style="display:flex;align-items:center;gap:5px"><div style="width:8px;height:8px;border-radius:2px;background:var(--primary);flex-shrink:0"></div>Note de cohorte</div>
           <div style="display:flex;align-items:center;gap:5px"><div style="width:8px;height:8px;border-radius:2px;background:var(--success);flex-shrink:0"></div>Entrée personnelle</div>
           <?php if ($isOwnView): ?>
           <div style="display:flex;align-items:center;gap:5px"><div style="width:8px;height:8px;border-radius:2px;background:var(--primary);flex-shrink:0"></div>Aujourd'hui</div>
@@ -327,7 +349,7 @@ renderTopbar($pageTitle, $isOwnView
           <p>Notez votre travail, vos objectifs ou vos révisions.</p>
           <button class="btn btn-primary" onclick="openEntryModal()"><i class="fas fa-plus"></i> Ajouter une note</button>
           <?php else: ?>
-          <p>Aucune séance de cohorte ni entrée personnelle pour cet apprenant ce mois.</p>
+          <p>Aucune note de cohorte ni entrée personnelle pour cet apprenant ce mois.</p>
           <?php if ($canAddEntry): ?>
           <button class="btn btn-primary" onclick="openEntryModal()"><i class="fas fa-plus"></i> Ajouter une entrée</button>
           <?php endif; ?>
@@ -488,7 +510,7 @@ renderTopbar($pageTitle, $isOwnView
         <div class="form-group">
           <label class="form-label">Titre <span class="required">*</span></label>
           <input type="text" name="title" id="entry-title-input" class="form-control" required
-            placeholder="<?= $isOwnView ? 'Ex : Révision chapitre 3, Travail sur la compétence C1.2…' : 'Titre de la séance ou de l\'objectif' ?>">
+            placeholder="<?= $isOwnView ? 'Ex : Révision chapitre 3, Travail sur la compétence C1.2…' : 'Titre de la note ou de l\'objectif' ?>">
         </div>
 
         <div class="form-group">

@@ -121,6 +121,14 @@ $contentType = $seance['content_type'] ?? 'text';
 $contentUrl  = $seance['content_url']  ?? '';
 $contentBody = $seance['content_body'] ?? '';
 
+// Pour les séances de type quiz : récupérer l'id du quiz lié
+$linkedQuizId = 0;
+if ($contentType === 'quiz') {
+    $qStmt = $pdo->prepare('SELECT id FROM quizzes WHERE module_id = ? LIMIT 1');
+    $qStmt->execute([$moduleId]);
+    $linkedQuizId = (int)($qStmt->fetchColumn() ?: 0);
+}
+
 // Convertir YouTube/Vimeo en URL embed
 function makeEmbedUrl(string $url): string {
     if (preg_match('/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/', $url, $m)) {
@@ -270,6 +278,21 @@ renderTopbar($pageTitle, [
             <i class="fas fa-external-link-alt"></i> Ouvrir le contenu
           </a>
         </div>
+
+      <?php elseif ($contentType === 'quiz'): ?>
+        <?php if ($linkedQuizId): ?>
+        <div style="padding:40px 24px;text-align:center">
+          <div style="font-size:48px;margin-bottom:16px">📝</div>
+          <p style="color:var(--text-muted);margin-bottom:24px">Cette séance comprend un quiz d'évaluation.</p>
+          <a href="<?= url('student/quiz/take.php?id=' . $linkedQuizId) ?>" class="btn btn-primary btn-lg">
+            <i class="fas fa-pencil-alt"></i> Commencer le quiz
+          </a>
+        </div>
+        <?php else: ?>
+        <div style="padding:24px;text-align:center;color:var(--text-muted);font-style:italic">
+          <i class="fas fa-info-circle" style="margin-right:6px"></i> Quiz non encore configuré.
+        </div>
+        <?php endif; ?>
 
       <?php else: ?>
         <div style="padding:24px;text-align:center;color:var(--text-muted);font-style:italic">

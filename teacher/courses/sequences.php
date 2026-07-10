@@ -44,8 +44,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect(url('teacher/courses/sequences.php#seq-' . $seqId));
 }
 
-// ── Données ───────────────────────────────────────────────────────────────────
-$seqs = $pdo->query("
+// ── Filtres ───────────────────────────────────────────────────────────────────
+$rncpId = (int)($_GET['rncp_id']      ?? 0);
+$atId   = (int)($_GET['at_id']        ?? 0);
+$compId = (int)($_GET['competency_id'] ?? 0);
+
+// ── Données filtres (dropdowns) ───────────────────────────────────────────────
+$allRncps = $pdo->query("
+    SELECT DISTINCT rt.id, rt.rncp_code, rt.title
+    FROM rncp_titles rt
+    JOIN activity_types at ON at.rncp_title_id = rt.id
+    JOIN competencies c ON c.activity_type_id = at.id
+    JOIN sequences s ON s.competency_id = c.id
+    ORDER BY rt.rncp_code
+")->fetchAll();
+
+$allATs = [];
+if ($rncpId) {
+    $s = $pdo->prepare("
+        SELECT DISTINCT at.id, at.code, at.title FROM activity_types at
+        JOIN competencies c ON c.activity_type_id = at.id
+        JOIN sequences seq ON seq.competency_id = c.id
+        WHERE at.rncp_title_id = ?
+        ORDER BY at.order_num, at.code
+    ");
+    $s->execute([$rncpId]);
+    $allATs = $s->fetchAll();
+}
+
+$allComps = [];
+if ($atId) {
+    $s = $pdo->prepare("
+        SELECT DISTINCT c.id, c.code, c.title FROM competencies c
+        JOIN sequences seq ON seq.competency_id = c.id
+        WHERE c.activity_type_id = ?
+        ORDER BY c.order_num, c.code
+    ");
+    $s->execute([$atId]);
+    $allComps = $s->fetchAll();
+}
+
+// ── Données séquences ─────────────────────────────────────────────────────────
+$sqlWhere = '';
+$sqlParams = [];
+if ($compId)  { $sqlWhere .= ' AND s.competency_id = ?';   $sqlParams[] = $compId; }
+elseif ($atId){ $sqlWhere .= ' AND at.id = ?';              $sqlParams[] = $atId; }
+elseif ($rncpId){ $sqlWhere .= ' AND rt.id = ?';            $sqlParams[] = $rncpId; }
+
+$seqStmt = $pdo->prepare("
     SELECT s.id, s.title, s.order_num, s.competency_id, s.is_published,
            c.code AS comp_code, c.title AS comp_title,
            at.id AS at_id, at.code AS at_code, at.title AS at_title,
@@ -55,8 +101,11 @@ $seqs = $pdo->query("
     JOIN competencies c  ON s.competency_id = c.id
     JOIN activity_types at ON c.activity_type_id = at.id
     JOIN rncp_titles rt  ON at.rncp_title_id = rt.id
+    WHERE 1=1 $sqlWhere
     ORDER BY rt.rncp_code, at.order_num, c.order_num, s.order_num, s.id
-")->fetchAll();
+");
+$seqStmt->execute($sqlParams);
+$seqs = $seqStmt->fetchAll();
 
 // Regrouper par compétence, AT, RNCP
 $tree = [];
@@ -87,6 +136,51 @@ renderTopbar('Séquences', [['Enseignant', url('teacher/index.php')], ['Séquenc
     <a href="<?= url('teacher/courses/sequence_create.php') ?>" class="btn btn-primary">
       <i class="fas fa-plus"></i> Nouvelle séquence
     </a>
+  </div>
+
+  <!-- Filtres cascade RNCP → AT → Compétence -->
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-body" style="padding:14px 18px">
+      <form id="filter-form" method="GET" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+
+        <!-- RNCP -->
+        <select name="rncp_id" class="form-control" style="width:220px" onchange="onRncpChange(this.value)">
+          <option value="">Tous les RNCP</option>
+          <?php foreach ($allRncps as $r): ?>
+          <option value="<?= $r['id'] ?>" <?= $rncpId == $r['id'] ? 'selected' : '' ?>>
+            <?= e($r['rncp_code']) ?> — <?= e($r['title']) ?>
+          </option>
+          <?php endforeach; ?>
+        </select>
+
+        <!-- AT (visible si RNCP sélectionné) -->
+        <select name="at_id" id="sel-at" class="form-control" style="width:220px<?= !$rncpId ? ';display:none' : '' ?>" onchange="onAtChange(this.value)">
+          <option value="">Toutes les AT</option>
+          <?php foreach ($allATs as $a): ?>
+          <option value="<?= $a['id'] ?>" <?= $atId == $a['id'] ? 'selected' : '' ?>>
+            <?= e($a['code']) ?> — <?= e($a['title']) ?>
+          </option>
+          <?php endforeach; ?>
+        </select>
+
+        <!-- Compétence (visible si AT sélectionnée) -->
+        <select name="competency_id" id="sel-comp" class="form-control" style="width:220px<?= !$atId ? ';display:none' : '' ?>" onchange="document.getElementById('filter-form').submit()">
+          <option value="">Toutes les compétences</option>
+          <?php foreach ($allComps as $c): ?>
+          <option value="<?= $c['id'] ?>" <?= $compId == $c['id'] ? 'selected' : '' ?>>
+            <?= e($c['code']) ?> — <?= e($c['title']) ?>
+          </option>
+          <?php endforeach; ?>
+        </select>
+
+        <?php if ($rncpId || $atId || $compId): ?>
+        <a href="<?= url('teacher/courses/sequences.php') ?>" class="btn btn-ghost btn-sm" style="white-space:nowrap">
+          <i class="fas fa-times"></i> Effacer
+        </a>
+        <?php endif; ?>
+
+      </form>
+    </div>
   </div>
 
   <?php if (empty($tree)): ?>
@@ -220,4 +314,17 @@ renderTopbar('Séquences', [['Enseignant', url('teacher/index.php')], ['Séquenc
 <style>
 .seq-row:hover { background: var(--bg-elevated) !important; }
 </style>
+<script>
+function onRncpChange(val) {
+  // Réinitialise AT et Comp, soumet
+  document.querySelector('[name="at_id"]').value = '';
+  document.querySelector('[name="competency_id"]').value = '';
+  document.getElementById('filter-form').submit();
+}
+function onAtChange(val) {
+  // Réinitialise Comp, soumet
+  document.querySelector('[name="competency_id"]').value = '';
+  document.getElementById('filter-form').submit();
+}
+</script>
 <?php renderFooter(); ?>

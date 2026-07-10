@@ -31,8 +31,8 @@ $myQuizzes    = [];
 // ════════════════════════════════════════════════════════════════════════════
 if ($section === 'quiz') {
 
-    $where  = ['q.created_by = ?', 'qa.status = ?'];
-    $params = [$userId, 'completed'];
+    $where  = ['qa.status = ?'];
+    $params = ['completed'];
 
     if ($search)        { $where[] = '(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ?)'; $params[] = "%$search%"; $params[] = "%$search%"; $params[] = "%$search%"; }
     if ($quizId)        { $where[] = 'qa.quiz_id = ?';            $params[] = $quizId; }
@@ -88,36 +88,36 @@ if ($section === 'quiz') {
                SUM(CASE WHEN qa.review_status='pending' THEN 1 ELSE 0 END) AS pending_reviews
         FROM quiz_attempts qa
         JOIN quizzes q ON qa.quiz_id = q.id
-        WHERE q.created_by = ? AND qa.status='completed'
+        WHERE qa.status='completed'
     ");
-    $statsStmt->execute([$userId]);
+    $statsStmt->execute();
     $stats = $statsStmt->fetch();
 
     // Liste des quiz pour le filtre
-    $myQuizzesStmt = $pdo->prepare("SELECT id, title FROM quizzes WHERE created_by = ? ORDER BY title");
-    $myQuizzesStmt->execute([$userId]);
+    $myQuizzesStmt = $pdo->prepare("SELECT id, title FROM quizzes ORDER BY title");
+    $myQuizzesStmt->execute();
     $myQuizzes = $myQuizzesStmt->fetchAll();
 
-    // Données filtres pédagogiques (depuis les quiz de cet enseignant)
+    // Données filtres pédagogiques
     $filterRncpsStmt = $pdo->prepare("
         SELECT DISTINCT rt.id, rt.rncp_code, rt.title FROM rncp_titles rt
         JOIN formations f ON f.rncp_title_id = rt.id
         JOIN quizzes q ON q.formation_id = f.id
-        WHERE q.created_by = ? ORDER BY rt.rncp_code
+        ORDER BY rt.rncp_code
     ");
-    $filterRncpsStmt->execute([$userId]);
+    $filterRncpsStmt->execute();
     $filterRncps = $filterRncpsStmt->fetchAll();
 
-    $fSql = "SELECT DISTINCT f.id, f.title FROM formations f JOIN quizzes q ON q.formation_id = f.id WHERE q.created_by = ?";
-    $fP   = [$userId];
+    $fSql = "SELECT DISTINCT f.id, f.title FROM formations f JOIN quizzes q ON q.formation_id = f.id WHERE 1=1";
+    $fP   = [];
     if ($rncpId) { $fSql .= " AND f.rncp_title_id = ?"; $fP[] = $rncpId; }
     $fSql .= " ORDER BY f.title";
     $filterFormations = $pdo->prepare($fSql); $filterFormations->execute($fP); $filterFormations = $filterFormations->fetchAll();
 
     $filterModules = [];
     if ($formationId) {
-        $s = $pdo->prepare("SELECT DISTINCT m.id, m.title FROM modules m JOIN quizzes q ON q.module_id = m.id WHERE q.formation_id = ? AND q.created_by = ? ORDER BY m.order_num, m.title");
-        $s->execute([$formationId, $userId]); $filterModules = $s->fetchAll();
+        $s = $pdo->prepare("SELECT DISTINCT m.id, m.title FROM modules m JOIN quizzes q ON q.module_id = m.id WHERE q.formation_id = ? ORDER BY m.order_num, m.title");
+        $s->execute([$formationId]); $filterModules = $s->fetchAll();
     }
 
 // ════════════════════════════════════════════════════════════════════════════

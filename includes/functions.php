@@ -526,3 +526,103 @@ function getRarityColor(string $rarity): string {
     $colors = ['common'=>'#9ca3af','uncommon'=>'#22c55e','rare'=>'#3b82f6','epic'=>'#a855f7','legendary'=>'#f59e0b'];
     return $colors[$rarity] ?? '#9ca3af';
 }
+
+/**
+ * Envoie un email HTML via SMTP (config lue en base via getSetting).
+ * Retourne true si envoi réussi, false sinon (échec silencieux).
+ */
+function sendEmail(string $to, string $subject, string $htmlBody): bool {
+    $host     = getSetting('smtp_host', '');
+    $port     = (int)getSetting('smtp_port', '587');
+    $user     = getSetting('smtp_user', '');
+    $pass     = getSetting('smtp_pass', '');
+    $from     = getSetting('smtp_from', $user);
+    $siteName = getSetting('site_name', 'LMS CFA Pro');
+
+    if (!$host || !$user || !$pass || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    $useSsl      = ($port === 465);
+    $useStarttls = ($port === 587 || $port === 25);
+
+    $ctx = stream_context_create(['ssl' => [
+        'verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true,
+    ]]);
+
+    $addr   = ($useSsl ? 'ssl://' : 'tcp://') . $host . ':' . $port;
+    $socket = @stream_socket_client($addr, $errno, $errstr, 15, STREAM_CLIENT_CONNECT, $ctx);
+    if (!$socket) return false;
+
+    stream_set_timeout($socket, 10);
+
+    $read = function () use ($socket): string {
+        $buf = '';
+        while (!feof($socket)) {
+            $line = fgets($socket, 512);
+            if ($line === false) break;
+            $buf .= $line;
+            if (isset($line[3]) && $line[3] === ' ') break;
+        }
+        return $buf;
+    };
+    // Écriture complète (évite le deadlock fwrite partiel sur gros messages)
+    $write = function (string $data) use ($socket): void {
+        $len = strlen($data);
+        $sent = 0;
+        while ($sent < $len) {
+            $n = fwrite($socket, substr($data, $sent));
+            if ($n === false || $n === 0) break;
+            $sent += $n;
+        }
+    };
+    $cmd = function (string $line) use ($socket, $write, &$read): string {
+        $write($line . "\r\n");
+        return $read();
+    };
+    $code = fn(string $r): int => (int)substr(ltrim($r), 0, 3);
+
+    try {
+        if ($code($read()) !== 220) { fclose($socket); return false; }
+
+        $ehlo = gethostname() ?: 'lmscfapro';
+        if ($code($cmd("EHLO $ehlo")) !== 250) { fclose($socket); return false; }
+
+        if ($useStarttls) {
+            if ($code($cmd("STARTTLS")) !== 220) { fclose($socket); return false; }
+            stream_socket_enable_crypto($socket, true,
+                STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_1_CLIENT | STREAM_CRYPTO_METHOD_TLS_CLIENT
+            );
+            if ($code($cmd("EHLO $ehlo")) !== 250) { fclose($socket); return false; }
+        }
+
+        if ($code($cmd("AUTH LOGIN")) !== 334) { fclose($socket); return false; }
+        if ($code($cmd(base64_encode($user))) !== 334) { fclose($socket); return false; }
+        if ($code($cmd(base64_encode($pass))) !== 235) { fclose($socket); return false; }
+
+        if ($code($cmd("MAIL FROM:<$from>")) !== 250) { fclose($socket); return false; }
+        if ($code($cmd("RCPT TO:<$to>")) !== 250) { fclose($socket); return false; }
+        if ($code($cmd("DATA")) !== 354) { fclose($socket); return false; }
+
+        $now = date('r');
+        $msg  = "Date: $now\r\n";
+        $msg .= "From: =?UTF-8?B?" . base64_encode($siteName) . "?= <$from>\r\n";
+        $msg .= "To: $to\r\n";
+        $msg .= "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n";
+        $msg .= "MIME-Version: 1.0\r\n";
+        $msg .= "Content-Type: text/html; charset=UTF-8\r\n";
+        $msg .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+        $msg .= $htmlBody;
+        $msg .= "\r\n.";
+
+        $write($msg . "\r\n");
+        $ok = $code($read()) === 250;
+        $write("QUIT\r\n");
+        fclose($socket);
+        return $ok;
+
+    } catch (\Throwable $e) {
+        @fclose($socket);
+        return false;
+    }
+}
