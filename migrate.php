@@ -232,6 +232,30 @@ $migrations = [
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ",
 
+    '018_create_exercise_submissions' => "
+        CREATE TABLE IF NOT EXISTS `exercise_submissions` (
+          `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          `module_id` INT UNSIGNED NOT NULL,
+          `user_id` INT UNSIGNED NOT NULL,
+          `attempt_number` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+          `files` LONGTEXT DEFAULT NULL COMMENT 'JSON: [{path, name, ext}]',
+          `text_response` LONGTEXT DEFAULT NULL,
+          `submitted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          `status` ENUM('submitted','under_review','graded','returned') NOT NULL DEFAULT 'submitted',
+          `score` FLOAT DEFAULT NULL,
+          `max_score` FLOAT DEFAULT NULL,
+          `grade` VARCHAR(20) DEFAULT NULL,
+          `feedback` TEXT DEFAULT NULL,
+          `graded_by` INT UNSIGNED DEFAULT NULL,
+          `graded_at` DATETIME DEFAULT NULL,
+          INDEX `idx_exsub_module` (`module_id`),
+          INDEX `idx_exsub_user`   (`user_id`),
+          FOREIGN KEY (`module_id`)  REFERENCES `modules`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`user_id`)    REFERENCES `users`(`id`)   ON DELETE CASCADE,
+          FOREIGN KEY (`graded_by`)  REFERENCES `users`(`id`)   ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ",
+
     '004_create_case_study_submissions' => "
         CREATE TABLE IF NOT EXISTS `case_study_submissions` (
           `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

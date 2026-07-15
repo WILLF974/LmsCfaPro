@@ -8,7 +8,7 @@ $teacherId = (int)$_SESSION['user_id'];
 $type      = $_GET['type'] ?? ''; // 'quiz' | 'case_study'
 $subId     = (int)($_GET['id'] ?? 0);
 
-if (!$subId || !in_array($type, ['quiz','case_study'])) {
+if (!$subId || !in_array($type, ['quiz','case_study','exercise'])) {
     setFlash('error', 'Identifiant invalide.');
     redirect(url('teacher/evaluations/index.php'));
 }
@@ -55,6 +55,27 @@ if ($type === 'quiz') {
     }
     unset($ans);
 
+} elseif ($type === 'exercise') {
+    $stmt = $pdo->prepare("
+        SELECT es.*,
+               m.title AS module_title, m.description AS module_description,
+               u.first_name, u.last_name, u.email,
+               seq.title AS seq_title,
+               co.code AS co_code, co.title AS co_title,
+               at.code AS at_code, at.title AS at_title,
+               rt.rncp_code
+        FROM exercise_submissions es
+        JOIN modules m ON es.module_id = m.id
+        JOIN users   u ON es.user_id   = u.id
+        LEFT JOIN sequences      seq ON m.sequence_id      = seq.id
+        LEFT JOIN competencies   co  ON seq.competency_id  = co.id
+        LEFT JOIN activity_types at  ON co.activity_type_id = at.id
+        LEFT JOIN rncp_titles    rt  ON at.rncp_title_id   = rt.id
+        WHERE es.id = ?
+    ");
+    $stmt->execute([$subId]);
+    $submission = $stmt->fetch();
+    if (!$submission) { setFlash('error', 'Soumission introuvable.'); redirect(url('teacher/evaluations/index.php?section=exercise')); }
 } else {
     $stmt = $pdo->prepare("
         SELECT css.*, cs.title AS cs_title, cs.description AS cs_description, cs.file_type,
@@ -88,6 +109,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $grade       = trim($_POST['grade']        ?? '');
     $status      = $_POST['status']            ?? 'graded';
     $returnBack  = (int)($_POST['return_back'] ?? 0);
+
+    if ($type === 'exercise') {
+        if ($status === 'returned') {
+            $pdo->prepare("UPDATE exercise_submissions SET status='returned', feedback=?, graded_by=?, graded_at=NOW() WHERE id=?")
+                ->execute([$feedback ?: null, $teacherId, $subId]);
+            try { createNotification($submission['user_id'], 'Exercice retourné pour révision',
+                'Votre exercice "' . $submission['module_title'] . '" a été retourné' . ($feedback ? ' : ' . mb_strimwidth($feedback, 0, 100, '…') : '.'),
+                'warning', url('student/course/seance.php?id=' . $submission['module_id'])); } catch (\Exception $e) {}
+        } else {
+            $pdo->prepare("UPDATE exercise_submissions SET status='graded', score=?, max_score=?, grade=?, feedback=?, graded_by=?, graded_at=NOW() WHERE id=?")
+                ->execute([$score, $_POST['max_score'] !== '' ? (float)$_POST['max_score'] : null, $grade ?: null, $feedback ?: null, $teacherId, $subId]);
+            try { createNotification($submission['user_id'], 'Exercice corrigé',
+                'Votre exercice "' . $submission['module_title'] . '" a été corrigé' . ($score !== null ? ' — Note : ' . $score . '/' . ($_POST['max_score'] ?: '?') : '') . '.',
+                'success', url('student/course/seance.php?id=' . $submission['module_id'])); } catch (\Exception $e) {}
+        }
+        auditLog('exercise_graded', 'exercise_submissions', $subId);
+        setFlash('success', $status === 'returned' ? 'Exercice retourné à l\'apprenant.' : 'Correction enregistrée.');
+        redirect(url('teacher/evaluations/index.php?section=exercise'));
+    }
 
     if ($status === 'returned') {
         // Retourner sans note
@@ -142,15 +182,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ── Rendu ─────────────────────────────────────────────────────────────────────
-$pageTitle = $type === 'quiz' ? 'Corriger le quiz' : 'Corriger l\'étude de cas';
+$pageTitle = match($type) { 'quiz' => 'Corriger le quiz', 'exercise' => 'Corriger l\'exercice', default => 'Corriger l\'étude de cas' };
+$sectionUrl = match($type) { 'quiz' => url('teacher/evaluations/index.php?section=quiz'), 'exercise' => url('teacher/evaluations/index.php?section=exercise'), default => url('teacher/evaluations/index.php?section=case_study') };
+$subjectTitle = match($type) { 'quiz' => $submission['quiz_title'], 'exercise' => $submission['module_title'], default => $submission['cs_title'] };
 $studentName = e($submission['first_name'] . ' ' . $submission['last_name']);
 
 renderHead($pageTitle);
 renderSidebar('teacher');
 renderTopbar($pageTitle, [
     ['Enseignant', url('teacher/index.php')],
-    ['Corrections', url('teacher/evaluations/index.php?section=' . ($type==='quiz'?'quiz':'case_study'))],
-    [$type === 'quiz' ? $submission['quiz_title'] : $submission['cs_title'], '']
+    ['Corrections', $sectionUrl],
+    [$subjectTitle, '']
 ]);
 ?>
 <div class="page-content fade-in" style="max-width:900px">
@@ -173,7 +215,7 @@ renderTopbar($pageTitle, [
         <?php endif; ?>
       </div>
       <div style="flex:1;min-width:160px">
-        <div style="font-size:16px;font-weight:700"><?= e($type==='quiz' ? $submission['quiz_title'] : $submission['cs_title']) ?></div>
+        <div style="font-size:16px;font-weight:700"><?= e($subjectTitle) ?></div>
         <?php if ($submission['at_code']): ?><div style="margin-top:4px"><span class="badge badge-secondary" title="<?= e($submission['at_title']) ?>"><i class="fas fa-layer-group" style="color:#f59e0b"></i> <?= e($submission['at_code']) ?></span><?php endif; ?>
         <?php if ($submission['co_code']): ?><span class="badge badge-secondary" style="margin-left:4px" title="<?= e($submission['co_title']) ?>"><i class="fas fa-star" style="color:#ef4444"></i> <?= e($submission['co_code']) ?></span><?php endif; ?>
         <?php if ($type==='quiz'): ?>
@@ -189,7 +231,103 @@ renderTopbar($pageTitle, [
   </div>
 
   <!-- Travail soumis -->
-  <?php if ($type === 'quiz'): ?>
+  <?php if ($type === 'exercise'): ?>
+  <?php
+    $exFiles = $submission['files'] ? json_decode($submission['files'], true) : [];
+    $extIcons = ['pdf'=>['file-pdf','#ef4444'],'doc'=>['file-word','#3b82f6'],'docx'=>['file-word','#3b82f6'],'xls'=>['file-excel','#22c55e'],'xlsx'=>['file-excel','#22c55e'],'ppt'=>['file-powerpoint','#f97316'],'pptx'=>['file-powerpoint','#f97316'],'zip'=>['file-archive','#8b5cf6'],'txt'=>['file-alt','#6b7280']];
+  ?>
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <h3 class="card-title"><i class="fas fa-paperclip" style="color:var(--primary-light)"></i> Production remise</h3>
+      <span style="font-size:12px;color:var(--text-muted)">Tentative <?= $submission['attempt_number'] ?> · Soumis le <?= formatDate($submission['submitted_at'],'d/m/Y à H:i') ?></span>
+    </div>
+    <div class="card-body">
+      <?php if ($exFiles): ?>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:<?= $submission['text_response'] ? '20px' : '0' ?>">
+        <?php foreach ($exFiles as $f):
+          $ext = strtolower($f['ext'] ?? pathinfo($f['name'] ?? '', PATHINFO_EXTENSION));
+          [$ico, $col] = $extIcons[$ext] ?? ['file', '#6b7280'];
+          $fileUrl = uploadUrl($f['path']);
+        ?>
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius)">
+          <div style="width:36px;height:36px;border-radius:8px;background:<?= $col ?>18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <i class="fas fa-<?= $ico ?>" style="color:<?= $col ?>;font-size:16px"></i>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><?= e($f['name'] ?? basename($f['path'])) ?></div>
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase"><?= strtoupper($ext) ?></div>
+          </div>
+          <a href="<?= e($fileUrl) ?>" target="_blank" class="btn btn-secondary btn-sm">
+            <i class="fas fa-download"></i> Télécharger
+          </a>
+          <?php if ($ext === 'pdf'): ?>
+          <a href="<?= e($fileUrl) ?>" target="_blank" class="btn btn-ghost btn-sm"><i class="fas fa-eye"></i> Voir</a>
+          <?php endif; ?>
+        </div>
+        <?php endforeach; ?>
+      </div>
+      <?php else: ?>
+      <p style="font-size:13px;color:var(--text-muted);font-style:italic">Aucun fichier joint.</p>
+      <?php endif; ?>
+
+      <?php if ($submission['text_response']): ?>
+      <div>
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.05em;margin-bottom:8px">Commentaire de l'apprenant</div>
+        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;line-height:1.6;white-space:pre-wrap"><?= e($submission['text_response']) ?></div>
+      </div>
+      <?php endif; ?>
+    </div>
+  </div>
+
+  <!-- Formulaire de correction exercice -->
+  <div class="card">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-pen-fancy" style="color:var(--primary-light)"></i> Correction</h3></div>
+    <div class="card-body">
+      <form method="POST">
+        <?= csrfField() ?>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+          <div>
+            <label class="form-label">Note obtenue</label>
+            <input type="number" name="score" step="0.5" min="0" class="form-control"
+              value="<?= $submission['score'] !== null ? $submission['score'] : '' ?>" placeholder="ex : 14">
+          </div>
+          <div>
+            <label class="form-label">Sur (max)</label>
+            <input type="number" name="max_score" step="0.5" min="0" class="form-control"
+              value="<?= $submission['max_score'] ?? 20 ?>" placeholder="20">
+          </div>
+          <div>
+            <label class="form-label">Appréciation</label>
+            <select name="grade" class="form-control">
+              <option value="">— Sans appréciation —</option>
+              <?php foreach (['Acquis','En cours d\'acquisition','Non acquis','A','B','C','D','E','TB','B','AB','Insuffisant'] as $g): ?>
+              <option value="<?= $g ?>" <?= ($submission['grade'] ?? '') === $g ? 'selected' : '' ?>><?= $g ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:20px">
+          <label class="form-label">Feedback à l'apprenant</label>
+          <textarea name="feedback" class="form-control" rows="4" placeholder="Points forts, axes d'amélioration…" style="resize:vertical"><?= e($submission['feedback'] ?? '') ?></textarea>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="submit" name="status" value="graded" class="btn btn-success">
+            <i class="fas fa-check-circle"></i> Valider la correction
+          </button>
+          <button type="submit" name="status" value="under_review" class="btn btn-secondary">
+            <i class="fas fa-search"></i> Marquer « En cours »
+          </button>
+          <button type="submit" name="status" value="returned"
+            class="btn btn-danger" onclick="return confirm('Retourner cet exercice à l\'apprenant pour révision ?')">
+            <i class="fas fa-undo"></i> Retourner pour révision
+          </button>
+          <a href="<?= $sectionUrl ?>" class="btn btn-ghost" style="margin-left:auto">Annuler</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <?php elseif ($type === 'quiz'): ?>
   <!-- Réponses quiz -->
   <div style="margin-bottom:24px">
     <h2 style="font-size:15px;font-weight:700;margin-bottom:14px"><i class="fas fa-list-alt" style="color:var(--primary-light)"></i> Réponses de l'apprenant</h2>
@@ -271,7 +409,8 @@ renderTopbar($pageTitle, [
   </div>
   <?php endif; ?>
 
-  <!-- Formulaire de correction -->
+  <!-- Formulaire de correction (quiz / case_study uniquement) -->
+  <?php if ($type !== 'exercise'): ?>
   <div class="card" style="border:2px solid rgba(99,102,241,.3)">
     <div class="card-header" style="background:rgba(99,102,241,.06)">
       <h3 class="card-title"><i class="fas fa-pen-fancy" style="color:var(--primary-light)"></i> Correction de l'enseignant</h3>
@@ -335,5 +474,6 @@ renderTopbar($pageTitle, [
       </form>
     </div>
   </div>
+  <?php endif; ?>
 </div>
 <?php renderFooter(); ?>

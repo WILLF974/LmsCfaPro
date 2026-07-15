@@ -101,6 +101,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'compl
     redirect(url('student/course/seance.php?id=' . $moduleId));
 }
 
+// ── Exercice : charger soumissions et gérer le rendu ─────────────────────────
+$exerciseSubmissions = [];
+$latestExSub         = null;
+if ($contentType === 'exercise' && isStudent() && !$isPreview) {
+    try {
+        $exStmt = $pdo->prepare('SELECT * FROM exercise_submissions WHERE module_id=? AND user_id=? ORDER BY submitted_at DESC');
+        $exStmt->execute([$moduleId, $userId]);
+        $exerciseSubmissions = $exStmt->fetchAll();
+        $latestExSub = $exerciseSubmissions[0] ?? null;
+    } catch (\Exception $e) {}
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_exercise' && isStudent() && !$isPreview) {
+    requireCsrf();
+    $textResponse  = trim($_POST['text_response'] ?? '');
+    $uploadedFiles = [];
+    foreach (($_FILES['exercise_files']['name'] ?? []) as $i => $fname) {
+        if (empty($fname) || $_FILES['exercise_files']['error'][$i] !== UPLOAD_ERR_OK) continue;
+        $fFile = ['name' => $fname, 'tmp_name' => $_FILES['exercise_files']['tmp_name'][$i],
+                  'error' => $_FILES['exercise_files']['error'][$i],
+                  'size'  => $_FILES['exercise_files']['size'][$i],
+                  'type'  => $_FILES['exercise_files']['type'][$i]];
+        $up = uploadFile($fFile, 'exercises', ALLOWED_DOC_TYPES, MAX_UPLOAD_SIZE);
+        if ($up['success']) {
+            $uploadedFiles[] = ['path' => $up['path'],
+                                'name' => pathinfo($fname, PATHINFO_FILENAME),
+                                'ext'  => strtolower(pathinfo($fname, PATHINFO_EXTENSION))];
+        }
+    }
+    if (!$uploadedFiles && !$textResponse) {
+        setFlash('error', 'Veuillez joindre au moins un fichier ou saisir une réponse.');
+        redirect(url('student/course/seance.php?id=' . $moduleId));
+    }
+    try {
+        $cntStmt = $pdo->prepare('SELECT COUNT(*) FROM exercise_submissions WHERE module_id=? AND user_id=?');
+        $cntStmt->execute([$moduleId, $userId]);
+        $attemptNum = (int)$cntStmt->fetchColumn() + 1;
+        $pdo->prepare('INSERT INTO exercise_submissions (module_id, user_id, attempt_number, files, text_response) VALUES (?,?,?,?,?)')
+            ->execute([$moduleId, $userId, $attemptNum,
+                       $uploadedFiles ? json_encode($uploadedFiles, JSON_UNESCAPED_UNICODE) : null,
+                       $textResponse ?: null]);
+        auditLog('exercise_submitted', 'exercise_submissions', (int)$pdo->lastInsertId());
+        setFlash('success', 'Votre exercice a bien été soumis — votre enseignant le corrigera prochainement.');
+    } catch (\Exception $e) {
+        setFlash('error', 'Erreur lors de la soumission.');
+    }
+    redirect(url('student/course/seance.php?id=' . $moduleId));
+}
+
 // ── Séances adjacentes dans la même séquence ──────────────────────────────────
 $prevSeance = $nextSeance = null;
 if ($seance['seq_id']) {
@@ -216,39 +265,50 @@ renderTopbar($pageTitle, [
         <?php endif; ?>
         <?php endif; ?>
 
-      <?php elseif ($contentType === 'pdf'):
+      <?php elseif ($contentType === 'pdf' || $contentType === 'exercise'):
         $filePath = $seance['file_path'] ?? '';
         // file_path peut être un JSON (pages multiples) ou un chemin simple
         $pdfPages = [];
         if ($filePath) {
             $decoded = json_decode($filePath, true);
             if (is_array($decoded)) {
-                $pdfPages = array_map(fn($p) => is_array($p) ? ($p['url'] ?? uploadUrl($p['path'] ?? '')) : uploadUrl($p), $decoded);
+                $pdfPages = array_map(fn($p) => is_array($p)
+                    ? ['url' => $p['url'] ?? uploadUrl($p['path'] ?? ''), 'name' => $p['name'] ?? pathinfo($p['path'] ?? '', PATHINFO_FILENAME)]
+                    : ['url' => uploadUrl($p), 'name' => pathinfo($p, PATHINFO_FILENAME)],
+                $decoded);
             } else {
-                $pdfPages = [uploadUrl($filePath)];
+                $pdfPages = [['url' => uploadUrl($filePath), 'name' => pathinfo($filePath, PATHINFO_FILENAME)]];
             }
         } elseif ($contentUrl) {
-            $pdfPages = [$contentUrl];
+            $pdfPages = [['url' => $contentUrl, 'name' => 'Contenu']];
         }
       ?>
         <?php if ($pdfPages): ?>
-        <div id="pdf-wrapper">
-          <div id="pdf-container" style="height:600px">
-            <iframe id="pdf-iframe" src="<?= e($pdfPages[0]) ?>" style="width:100%;height:100%;border:0" loading="lazy"></iframe>
+          <?php if (count($pdfPages) > 1): ?>
+            <?php foreach ($pdfPages as $pi => $p): ?>
+            <div style="<?= $pi > 0 ? 'border-top:1px solid var(--border)' : '' ?>">
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-card)">
+                <span style="width:22px;height:22px;background:#ef4444;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:white;flex-shrink:0"><?= $pi+1 ?></span>
+                <span style="flex:1;font-size:13px;font-weight:600"><?= e($p['name']) ?></span>
+                <a href="<?= e($p['url']) ?>" target="_blank" style="color:var(--text-muted);font-size:13px;text-decoration:none" title="Ouvrir dans un onglet"><i class="fas fa-external-link-alt"></i></a>
+              </div>
+              <div style="height:650px">
+                <iframe src="<?= e($p['url']) ?>#toolbar=1&navpanes=1" style="width:100%;height:100%;border:0" loading="lazy"></iframe>
+              </div>
+            </div>
+            <?php endforeach; ?>
+          <?php else: ?>
+          <div style="position:relative">
+            <div id="pdf-wrapper" style="position:relative;height:650px">
+              <iframe id="pdf-iframe" src="<?= e($pdfPages[0]['url']) ?>#toolbar=1&navpanes=1" style="width:100%;height:100%;border:0" loading="lazy"></iframe>
+              <button onclick="togglePdfFullscreen()" id="pdf-fs-btn"
+                style="position:absolute;top:10px;right:10px;z-index:10;background:rgba(0,0,0,.55);border:none;border-radius:6px;padding:6px 10px;cursor:pointer;color:#fff;font-size:13px;display:flex;align-items:center;gap:6px;backdrop-filter:blur(4px)"
+                title="Plein écran">
+                <i class="fas fa-expand" id="pdf-fs-icon"></i>
+              </button>
+            </div>
           </div>
-          <button onclick="togglePdfFullscreen()" id="pdf-fs-btn"
-            style="position:absolute;top:10px;right:10px;z-index:10;background:rgba(0,0,0,.55);border:none;border-radius:6px;padding:6px 10px;cursor:pointer;color:#fff;font-size:13px;display:flex;align-items:center;gap:6px;backdrop-filter:blur(4px)"
-            title="Plein écran">
-            <i class="fas fa-expand" id="pdf-fs-icon"></i>
-          </button>
-        </div>
-        <?php if (count($pdfPages) > 1): ?>
-        <div style="padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border-color)">
-          <?php foreach ($pdfPages as $pi => $purl): ?>
-          <a href="<?= e($purl) ?>" target="_blank" class="btn btn-ghost btn-sm">Fichier <?= $pi+1 ?></a>
-          <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
+          <?php endif; ?>
         <?php else: ?>
         <div style="padding:24px;text-align:center;color:var(--text-muted);font-style:italic">
           <i class="fas fa-info-circle" style="margin-right:6px"></i> Contenu non disponible.
@@ -300,6 +360,104 @@ renderTopbar($pageTitle, [
         </div>
       <?php endif; ?>
     </div>
+
+    <!-- ── Rendu de l'exercice ── -->
+    <?php if ($contentType === 'exercise' && isStudent() && !$isPreview):
+      $exStatus   = $latestExSub['status'] ?? null;
+      $canSubmit  = !$exStatus || in_array($exStatus, ['returned', 'graded']);
+      $borderColor = $exStatus === 'graded' ? 'rgba(16,185,129,.4)' : ($exStatus === 'returned' ? 'rgba(239,68,68,.3)' : ($exStatus ? 'rgba(245,158,11,.3)' : 'rgba(99,102,241,.25)'));
+    ?>
+    <div class="card" style="margin-bottom:16px;border:2px solid <?= $borderColor ?>">
+      <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-paper-plane" style="color:var(--primary-light)"></i> Rendre l'exercice</h3>
+        <?php if ($exStatus): ?>
+        <?php $statusLabels = ['submitted'=>['Soumis','warning'],'under_review'=>['En correction','info'],'graded'=>['Corrigé','success'],'returned'=>['Retourné','danger']]; ?>
+        <span class="badge badge-<?= $statusLabels[$exStatus][1] ?? 'secondary' ?>"><?= $statusLabels[$exStatus][0] ?? $exStatus ?></span>
+        <?php endif; ?>
+      </div>
+      <div class="card-body">
+
+        <?php if ($latestExSub): ?>
+        <?php if ($exStatus === 'graded'): ?>
+        <div style="display:flex;align-items:flex-start;gap:14px;padding:14px;background:rgba(16,185,129,.07);border-radius:var(--radius);margin-bottom:16px">
+          <i class="fas fa-check-circle" style="color:var(--success);font-size:22px;flex-shrink:0;margin-top:2px"></i>
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+              <strong style="color:var(--success)">Exercice corrigé</strong>
+              <?php if ($latestExSub['score'] !== null): ?><span class="badge badge-success" style="font-size:14px;padding:4px 12px"><?= $latestExSub['score'] ?><?php if ($latestExSub['max_score']): ?>/<?= $latestExSub['max_score'] ?><?php endif; ?></span><?php endif; ?>
+              <?php if ($latestExSub['grade']): ?><span class="badge badge-primary"><?= e($latestExSub['grade']) ?></span><?php endif; ?>
+            </div>
+            <?php if ($latestExSub['feedback']): ?><p style="color:var(--text-muted);font-size:13px;margin:0;font-style:italic">"<?= e($latestExSub['feedback']) ?>"</p><?php endif; ?>
+          </div>
+        </div>
+        <?php elseif ($exStatus === 'under_review'): ?>
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(14,165,233,.07);border:1px solid rgba(14,165,233,.2);border-radius:var(--radius);margin-bottom:16px">
+          <i class="fas fa-search" style="color:var(--info);font-size:18px"></i>
+          <div><div style="font-weight:600">En cours de correction par votre enseignant</div>
+          <div style="font-size:12px;color:var(--text-muted)">Tentative <?= $latestExSub['attempt_number'] ?> · Soumis le <?= formatDate($latestExSub['submitted_at'], 'd/m/Y à H:i') ?></div></div>
+        </div>
+        <?php elseif ($exStatus === 'submitted'): ?>
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:var(--radius);margin-bottom:16px">
+          <i class="fas fa-clock" style="color:var(--warning);font-size:18px"></i>
+          <div><div style="font-weight:600">En attente de correction</div>
+          <div style="font-size:12px;color:var(--text-muted)">Tentative <?= $latestExSub['attempt_number'] ?> · Soumis le <?= formatDate($latestExSub['submitted_at'], 'd/m/Y à H:i') ?></div></div>
+        </div>
+        <?php elseif ($exStatus === 'returned'): ?>
+        <div style="padding:12px 16px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:var(--radius);margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:8px;font-weight:600;color:var(--danger);margin-bottom:4px"><i class="fas fa-undo"></i> Travail retourné — à réviser</div>
+          <?php if ($latestExSub['feedback']): ?><p style="font-size:13px;color:var(--text-muted);margin:0;font-style:italic"><?= e($latestExSub['feedback']) ?></p><?php endif; ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if (count($exerciseSubmissions) > 1): ?>
+        <details style="margin-bottom:14px">
+          <summary style="font-size:12px;color:var(--text-muted);cursor:pointer">Voir les <?= count($exerciseSubmissions) ?> soumissions précédentes</summary>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+          <?php foreach ($exerciseSubmissions as $idx => $sub): if ($idx === 0) continue; ?>
+          <div style="font-size:12px;color:var(--text-muted);padding:6px 10px;background:var(--bg-elevated);border-radius:var(--radius)">
+            Tentative <?= $sub['attempt_number'] ?> — <?= formatDate($sub['submitted_at'], 'd/m/Y H:i') ?>
+            <span class="badge badge-<?= ['submitted'=>'warning','graded'=>'success','returned'=>'danger','under_review'=>'info'][$sub['status']] ?? 'secondary' ?>" style="margin-left:8px"><?= $sub['status'] ?></span>
+          </div>
+          <?php endforeach; ?>
+          </div>
+        </details>
+        <?php endif; ?>
+        <?php endif; ?>
+
+        <?php if ($canSubmit): ?>
+        <form method="POST" enctype="multipart/form-data">
+          <?= csrfField() ?>
+          <input type="hidden" name="action" value="submit_exercise">
+          <div style="margin-bottom:14px">
+            <label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px">
+              <i class="fas fa-paperclip" style="color:var(--primary-light)"></i> Joindre votre production
+              <span style="color:var(--text-muted);font-weight:400">(PDF, Word, PPT, Excel, ZIP — plusieurs fichiers acceptés)</span>
+            </label>
+            <input type="file" name="exercise_files[]" multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+              class="form-control">
+          </div>
+          <div style="margin-bottom:18px">
+            <label style="display:block;font-size:13px;font-weight:600;margin-bottom:7px">
+              <i class="fas fa-pen" style="color:var(--primary-light)"></i> Commentaire / démarche
+              <span style="color:var(--text-muted);font-weight:400">(optionnel)</span>
+            </label>
+            <textarea name="text_response" class="form-control" rows="4"
+              placeholder="Décrivez votre démarche, vos résultats, vos questions…"
+              style="resize:vertical"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary" onclick="return confirm('Soumettre votre production à l\'enseignant ?')">
+            <i class="fas fa-paper-plane"></i>
+            <?= $latestExSub ? 'Soumettre à nouveau' : 'Rendre l\'exercice' ?>
+          </button>
+        </form>
+        <?php elseif ($exStatus === 'submitted' || $exStatus === 'under_review'): ?>
+        <p style="font-size:13px;color:var(--text-muted);margin:0"><i class="fas fa-lock" style="margin-right:6px"></i>Nouvelle soumission impossible tant que votre enseignant n'a pas rendu son verdict.</p>
+        <?php endif; ?>
+
+      </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Description -->
     <?php if ($seance['description']): ?>

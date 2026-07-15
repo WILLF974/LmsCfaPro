@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $filePath  = $seance['file_path']  ?? null;
     $thumbnail = $seance['thumbnail']  ?? null;
 
-    if ($contentType === 'pdf') {
+    if (in_array($contentType, ['pdf', 'exercise'], true)) {
         $pdfEntries = [];
         foreach (($_POST['existing_pdf_paths'] ?? []) as $idx => $path) {
             $path = trim($path);
@@ -494,7 +494,7 @@ renderTopbar($pageTitle, [
 
             <?php
             $existingPdfs = null;
-            if ($isEdit && $seance['content_type'] === 'pdf' && $seance['file_path']) {
+            if ($isEdit && in_array($seance['content_type'], ['pdf', 'exercise'], true) && $seance['file_path']) {
                 $decoded = json_decode($seance['file_path'], true);
                 $existingPdfs = is_array($decoded) ? $decoded
                     : [['path' => $seance['file_path'], 'name' => pathinfo($seance['file_path'], PATHINFO_FILENAME)]];
@@ -806,7 +806,7 @@ function updateContentZone(type) {
     resourcesStep.style.display = 'none';
   } else if (type === 'text') {
     zoneText.style.display = 'block';
-  } else if (type === 'pdf') {
+  } else if (type === 'pdf' || type === 'exercise') {
     zonePdfMulti.style.display = 'block';
     var hasExisting = zonePdfMulti.dataset.hasExisting === 'true';
     if (!hasExisting && !document.querySelector('#pdf-slots .pdf-slot')) addPdfSlot();

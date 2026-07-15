@@ -7,7 +7,7 @@ $pdo    = getDB();
 $userId = (int)$_SESSION['user_id'];
 
 // ── Section active : quiz | case_study ────────────────────────────────────────
-$section = in_array($_GET['section'] ?? '', ['case_study']) ? 'case_study' : 'quiz';
+$section = in_array($_GET['section'] ?? '', ['exercise']) ? 'exercise' : 'quiz';
 
 // ── Filtres communs ───────────────────────────────────────────────────────────
 $search      = trim($_GET['q']              ?? '');
@@ -121,90 +121,82 @@ if ($section === 'quiz') {
     }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SECTION ÉTUDES DE CAS
+// SECTION EXERCICES
 // ════════════════════════════════════════════════════════════════════════════
 } else {
 
-    // Section études de cas : on affiche les SOUMISSIONS d'étudiants
-    $where  = ['cs.created_by = ?'];
-    $params = [$userId];
-    if ($search)      { $where[] = '(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR cs.title LIKE ?)'; $params[] = "%$search%"; $params[] = "%$search%"; $params[] = "%$search%"; $params[] = "%$search%"; }
-    if ($subStatus)   { $where[] = 'css.status = ?';              $params[] = $subStatus; }
-    if ($fileType)    { $where[] = 'cs.file_type = ?';            $params[] = $fileType; }
-    if ($rncpId)      { $where[] = 'f.rncp_title_id = ?';         $params[] = $rncpId; }
-    if ($formationId) { $where[] = 'css.formation_id = ?';        $params[] = $formationId; }
-    if ($moduleId)    { $where[] = 'cs.module_id = ?';            $params[] = $moduleId; }
-    if ($atId)        { $where[] = 'cs.activity_type_id = ?';     $params[] = $atId; }
-    if ($compId)      { $where[] = 'cs.competency_id = ?';        $params[] = $compId; }
-    $ws = 'WHERE ' . implode(' AND ', $where);
+    $where  = ['1=1'];
+    $params = [];
+    if ($search)    { $where[] = '(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR m.title LIKE ?)'; $params = array_merge($params, ["%$search%","%$search%","%$search%","%$search%"]); }
+    if ($subStatus) { $where[] = 'es.status = ?';            $params[] = $subStatus; }
+    if ($moduleId)  { $where[] = 'es.module_id = ?';         $params[] = $moduleId; }
+    if ($rncpId)    { $where[] = 'rt.id = ?';                $params[] = $rncpId; }
+    if ($atId)      { $where[] = 'at.id = ?';                $params[] = $atId; }
+    if ($compId)    { $where[] = 'co.id = ?';                $params[] = $compId; }
+    $ws = implode(' AND ', $where);
 
-    $totalStmt = $pdo->prepare("
-        SELECT COUNT(*) FROM case_study_submissions css
-        JOIN case_studies cs ON css.case_study_id = cs.id
-        JOIN users u ON css.user_id = u.id
-        LEFT JOIN formations f ON css.formation_id = f.id
-        $ws
-    ");
+    $baseJoin = "
+        FROM exercise_submissions es
+        JOIN modules m  ON es.module_id = m.id
+        JOIN users   u  ON es.user_id   = u.id
+        LEFT JOIN sequences      seq ON m.sequence_id      = seq.id
+        LEFT JOIN competencies   co  ON seq.competency_id  = co.id
+        LEFT JOIN activity_types at  ON co.activity_type_id = at.id
+        LEFT JOIN rncp_titles    rt  ON at.rncp_title_id   = rt.id
+    ";
+
+    $totalStmt = $pdo->prepare("SELECT COUNT(*) $baseJoin WHERE $ws");
     $totalStmt->execute($params);
-    $p = paginate((int)$totalStmt->fetchColumn(), 15, $page);
+    $p = paginate((int)$totalStmt->fetchColumn(), 20, $page);
 
     $stmt = $pdo->prepare("
-        SELECT css.*, cs.title AS cs_title, cs.file_type,
+        SELECT es.*, m.title AS module_title,
                u.first_name, u.last_name, u.email,
-               f.title AS formation_title, f.rncp_title_id,
-               rt.rncp_code,
+               seq.title AS seq_title,
+               co.code AS co_code, co.title AS co_title,
                at.code AS at_code, at.title AS at_title,
-               co.code AS co_code, co.title AS co_title
-        FROM case_study_submissions css
-        JOIN case_studies cs ON css.case_study_id = cs.id
-        JOIN users u ON css.user_id = u.id
-        LEFT JOIN formations f     ON css.formation_id      = f.id
-        LEFT JOIN rncp_titles rt   ON f.rncp_title_id       = rt.id
-        LEFT JOIN activity_types at ON cs.activity_type_id  = at.id
-        LEFT JOIN competencies co   ON cs.competency_id     = co.id
-        $ws
+               rt.rncp_code
+        $baseJoin
+        WHERE $ws
         ORDER BY
-          CASE css.status WHEN 'submitted' THEN 0 WHEN 'under_review' THEN 1 ELSE 2 END,
-          css.submitted_at DESC
+          CASE es.status WHEN 'submitted' THEN 0 WHEN 'under_review' THEN 1 ELSE 2 END,
+          es.submitted_at DESC
         LIMIT ? OFFSET ?
     ");
     $stmt->execute(array_merge($params, [$p['perPage'], $p['offset']]));
     $submissions = $stmt->fetchAll();
 
-    // Stats soumissions études de cas
     $statsStmt = $pdo->prepare("
         SELECT COUNT(*) AS total,
-               SUM(CASE WHEN css.status IN ('submitted','under_review') THEN 1 ELSE 0 END) AS pending_reviews,
-               SUM(CASE WHEN css.status='graded' THEN 1 ELSE 0 END) AS graded
-        FROM case_study_submissions css
-        JOIN case_studies cs ON css.case_study_id = cs.id
-        WHERE cs.created_by = ?
+               SUM(CASE WHEN es.status IN ('submitted','under_review') THEN 1 ELSE 0 END) AS pending_reviews,
+               SUM(CASE WHEN es.status='graded' THEN 1 ELSE 0 END) AS graded
+        FROM exercise_submissions es
     ");
-    $statsStmt->execute([$userId]);
+    $statsStmt->execute();
     $stats = $statsStmt->fetch();
 
-    // Données filtres pédagogiques (depuis les soumissions)
-    $ownerJoinCS = "AND cs.created_by = $userId";
     $filterRncpsStmt = $pdo->prepare("
         SELECT DISTINCT rt.id, rt.rncp_code, rt.title FROM rncp_titles rt
-        JOIN formations f ON f.rncp_title_id = rt.id
-        JOIN case_study_submissions css ON css.formation_id = f.id
-        JOIN case_studies cs ON css.case_study_id = cs.id $ownerJoinCS
+        JOIN activity_types at ON at.rncp_title_id = rt.id
+        JOIN competencies co ON co.activity_type_id = at.id
+        JOIN sequences seq ON seq.competency_id = co.id
+        JOIN modules m ON m.sequence_id = seq.id
+        JOIN exercise_submissions es ON es.module_id = m.id
         ORDER BY rt.rncp_code
     ");
-    $filterRncpsStmt->execute([]); $filterRncps = $filterRncpsStmt->fetchAll();
+    $filterRncpsStmt->execute(); $filterRncps = $filterRncpsStmt->fetchAll();
 
-    $fSql = "SELECT DISTINCT f.id, f.title FROM formations f JOIN case_study_submissions css ON css.formation_id = f.id JOIN case_studies cs ON css.case_study_id = cs.id $ownerJoinCS WHERE 1=1";
-    $fP   = [];
-    if ($rncpId) { $fSql .= " AND f.rncp_title_id = ?"; $fP[] = $rncpId; }
-    $fSql .= " ORDER BY f.title";
-    $filterFormations = $pdo->prepare($fSql); $filterFormations->execute($fP); $filterFormations = $filterFormations->fetchAll();
+    $filterFormations = [];
 
     $filterModules = [];
-    if ($formationId) {
-        $mSql = "SELECT DISTINCT m.id, m.title FROM modules m JOIN case_studies cs ON cs.module_id = m.id JOIN case_study_submissions css ON css.case_study_id = cs.id WHERE m.formation_id = ? $ownerJoinCS ORDER BY m.order_num, m.title";
-        $s = $pdo->prepare($mSql); $s->execute([$formationId]); $filterModules = $s->fetchAll();
+    $mSql = "SELECT DISTINCT m.id, m.title FROM modules m JOIN exercise_submissions es ON es.module_id = m.id WHERE 1=1";
+    $mP = [];
+    if ($rncpId) {
+        $mSql .= " AND m.sequence_id IN (SELECT seq.id FROM sequences seq JOIN competencies co ON seq.competency_id=co.id JOIN activity_types at ON co.activity_type_id=at.id WHERE at.rncp_title_id=?)";
+        $mP[] = $rncpId;
     }
+    $mSql .= " ORDER BY m.title";
+    $s = $pdo->prepare($mSql); $s->execute($mP); $filterModules = $s->fetchAll();
 }
 
 // ── ATs et compétences (commun aux deux sections) ─────────────────────────────
@@ -269,11 +261,11 @@ renderTopbar('Corrections & Résultats', [['Enseignant', url('teacher/index.php'
       <i class="fas fa-tasks"></i>
       <span>Quiz & Évaluations</span>
     </a>
-    <a href="<?= url('teacher/evaluations/index.php?section=case_study') ?>"
-       class="btn <?= $section==='case_study' ? 'btn-primary' : 'btn-secondary' ?>"
+    <a href="<?= url('teacher/evaluations/index.php?section=exercise') ?>"
+       class="btn <?= $section==='exercise' ? 'btn-primary' : 'btn-secondary' ?>"
        style="display:flex;align-items:center;gap:8px;padding:10px 20px">
-      <i class="fas fa-folder-open"></i>
-      <span>Études de cas</span>
+      <i class="fas fa-pencil-alt"></i>
+      <span>Exercices rendus</span>
     </a>
   </div>
 
@@ -305,7 +297,7 @@ renderTopbar('Corrections & Résultats', [['Enseignant', url('teacher/index.php'
       <div style="width:44px;height:44px;border-radius:var(--radius);background:rgba(99,102,241,.15);display:flex;align-items:center;justify-content:center"><i class="fas fa-inbox" style="color:var(--primary-light)"></i></div>
       <div><div style="font-size:24px;font-weight:800;color:white"><?= $stats['total'] ?? 0 ?></div><div style="font-size:12px;color:var(--text-muted)">Soumissions reçues</div></div>
     </div></div>
-    <a href="<?= url('teacher/evaluations/index.php?section=case_study&sub_status=submitted') ?>" style="text-decoration:none">
+    <a href="<?= url('teacher/evaluations/index.php?section=exercise&sub_status=submitted') ?>" style="text-decoration:none">
     <div class="card" style="border:1px solid rgba(245,158,11,<?= ($stats['pending_reviews']??0)>0?'.5':'.15' ?>)"><div class="card-body" style="display:flex;align-items:center;gap:12px">
       <div style="width:44px;height:44px;border-radius:var(--radius);background:rgba(245,158,11,.2);display:flex;align-items:center;justify-content:center"><i class="fas fa-clock" style="color:var(--warning)"></i></div>
       <div><div style="font-size:24px;font-weight:800;color:var(--warning)"><?= $stats['pending_reviews'] ?? 0 ?></div><div style="font-size:12px;color:var(--text-muted)">En attente</div></div>
@@ -577,31 +569,30 @@ renderTopbar('Corrections & Résultats', [['Enseignant', url('teacher/index.php'
   ?>
   <?php endif; ?>
 
-  <!-- ═══════════════════ CONTENU : ÉTUDES DE CAS ═══════════════════ -->
+  <!-- ═══════════════════ CONTENU : EXERCICES ═══════════════════ -->
   <?php else: ?>
 
   <?php if (empty($submissions)): ?>
   <div class="empty-state">
-    <div class="icon">📬</div>
-    <h3><?= $hasFilters ? 'Aucune soumission ne correspond aux filtres' : 'Aucune soumission reçue' ?></h3>
-    <p><?= $hasFilters ? 'Essayez d\'élargir vos critères.' : 'Vos apprenants n\'ont pas encore soumis de travail sur vos études de cas.' ?></p>
+    <div class="icon">📝</div>
+    <h3><?= $hasFilters ? 'Aucun exercice ne correspond aux filtres' : 'Aucun exercice rendu' ?></h3>
+    <p><?= $hasFilters ? 'Essayez d\'élargir vos critères.' : 'Vos apprenants n\'ont pas encore soumis d\'exercice.' ?></p>
     <?php if ($hasFilters): ?>
-    <a href="<?= url('teacher/evaluations/index.php?section=case_study') ?>" class="btn btn-secondary" style="margin-top:8px"><i class="fas fa-times"></i> Réinitialiser</a>
+    <a href="<?= url('teacher/evaluations/index.php?section=exercise') ?>" class="btn btn-secondary" style="margin-top:8px"><i class="fas fa-times"></i> Réinitialiser</a>
     <?php endif; ?>
   </div>
   <?php else: ?>
-  <?php
-  $subStatusLabels = ['submitted'=>['label'=>'À corriger','color'=>'var(--warning)','icon'=>'clock'],'under_review'=>['label'=>'En cours','color'=>'var(--info)','icon'=>'search'],'graded'=>['label'=>'Corrigé','color'=>'var(--success)','icon'=>'check-circle'],'returned'=>['label'=>'Retourné','color'=>'var(--danger)','icon'=>'undo']];
-  ?>
+  <?php $subStatusLabels = ['submitted'=>['label'=>'À corriger','color'=>'var(--warning)','icon'=>'clock'],'under_review'=>['label'=>'En cours','color'=>'var(--info)','icon'=>'search'],'graded'=>['label'=>'Corrigé','color'=>'var(--success)','icon'=>'check-circle'],'returned'=>['label'=>'Retourné','color'=>'var(--danger)','icon'=>'undo']]; ?>
   <div class="card">
     <div style="overflow-x:auto">
       <table class="table">
         <thead>
           <tr>
             <th>Apprenant</th>
-            <th>Étude de cas</th>
-            <th>Formation</th>
-            <th>Rattachement</th>
+            <th>Séance exercice</th>
+            <th>Séquence / Compétence</th>
+            <th>RNCP</th>
+            <th>Tentative</th>
             <th>Statut</th>
             <th>Note</th>
             <th>Soumis le</th>
@@ -611,7 +602,6 @@ renderTopbar('Corrections & Résultats', [['Enseignant', url('teacher/index.php'
         <tbody>
           <?php foreach ($submissions as $sub):
             $sl = $subStatusLabels[$sub['status']] ?? $subStatusLabels['submitted'];
-            $ti = $typeIconsCS[$sub['file_type']] ?? $typeIconsCS['document'];
             $needsAction = in_array($sub['status'], ['submitted','under_review']);
           ?>
           <tr style="<?= $needsAction ? 'background:rgba(245,158,11,.04)' : '' ?>">
@@ -626,23 +616,21 @@ renderTopbar('Corrections & Résultats', [['Enseignant', url('teacher/index.php'
             </td>
             <td>
               <div style="display:flex;align-items:center;gap:8px">
-                <div style="width:28px;height:28px;border-radius:6px;background:<?= $ti['color'] ?>22;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                  <i class="fas fa-<?= $ti['icon'] ?>" style="color:<?= $ti['color'] ?>;font-size:12px"></i>
+                <div style="width:28px;height:28px;border-radius:6px;background:rgba(16,185,129,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                  <i class="fas fa-pencil-alt" style="color:#10b981;font-size:12px"></i>
                 </div>
-                <span style="font-size:13px;font-weight:600"><?= e(mb_substr($sub['cs_title'],0,30)) ?></span>
+                <span style="font-size:13px;font-weight:600"><?= e(mb_substr($sub['module_title'],0,32)) ?></span>
               </div>
             </td>
             <td>
-              <div style="font-size:12px"><?= $sub['formation_title'] ? e(mb_substr($sub['formation_title'],0,26)) : '<span style="color:var(--text-faint)">—</span>' ?></div>
-              <?php if ($sub['rncp_code']): ?><div style="font-size:10px;color:var(--text-faint)"><?= e($sub['rncp_code']) ?></div><?php endif; ?>
+              <div style="font-size:12px"><?= $sub['seq_title'] ? e(mb_substr($sub['seq_title'],0,26)) : '<span style="color:var(--text-faint)">—</span>' ?></div>
+              <?php if ($sub['co_code']): ?><div style="font-size:10px;color:var(--text-faint)"><?= e($sub['co_code']) ?> — <?= e(mb_substr($sub['co_title'],0,20)) ?></div><?php endif; ?>
             </td>
             <td>
-              <div style="display:flex;flex-direction:column;gap:3px">
-                <?php if ($sub['at_code']): ?><span class="badge badge-secondary" style="font-size:10px" title="<?= e($sub['at_title']) ?>"><i class="fas fa-layer-group" style="color:#f59e0b"></i> <?= e($sub['at_code']) ?></span><?php endif; ?>
-                <?php if ($sub['co_code']): ?><span class="badge badge-secondary" style="font-size:10px" title="<?= e($sub['co_title']) ?>"><i class="fas fa-star" style="color:#ef4444"></i> <?= e($sub['co_code']) ?></span><?php endif; ?>
-                <?php if (!$sub['at_code'] && !$sub['co_code']): ?><span style="font-size:11px;color:var(--text-faint)">—</span><?php endif; ?>
-              </div>
+              <?php if ($sub['rncp_code']): ?><span style="font-size:11px;background:rgba(139,92,246,.15);color:#a78bfa;border-radius:4px;padding:1px 6px;font-weight:700"><?= e($sub['rncp_code']) ?></span><?php else: ?><span style="color:var(--text-faint)">—</span><?php endif; ?>
+              <?php if ($sub['at_code']): ?><div style="font-size:10px;color:var(--text-faint);margin-top:2px"><?= e($sub['at_code']) ?></div><?php endif; ?>
             </td>
+            <td style="text-align:center;font-size:13px;font-weight:600;color:var(--text-muted)"><?= $sub['attempt_number'] ?></td>
             <td>
               <span class="badge" style="background:<?= $sl['color'] ?>22;color:<?= $sl['color'] ?>;border:1px solid <?= $sl['color'] ?>44;font-size:11px">
                 <i class="fas fa-<?= $sl['icon'] ?>"></i> <?= $sl['label'] ?>
@@ -650,13 +638,13 @@ renderTopbar('Corrections & Résultats', [['Enseignant', url('teacher/index.php'
             </td>
             <td>
               <?php if ($sub['score'] !== null): ?>
-              <span style="font-size:14px;font-weight:700;color:var(--success)"><?= $sub['score'] ?><span style="font-size:10px;color:var(--text-muted)">/<?= $sub['max_score'] ?></span></span>
+              <span style="font-size:14px;font-weight:700;color:var(--success)"><?= $sub['score'] ?><?php if ($sub['max_score']): ?><span style="font-size:10px;color:var(--text-muted)">/<?= $sub['max_score'] ?></span><?php endif; ?></span>
               <?php if ($sub['grade']): ?><div style="font-size:10px;color:var(--text-muted)"><?= e($sub['grade']) ?></div><?php endif; ?>
               <?php else: ?><span style="color:var(--text-faint)">—</span><?php endif; ?>
             </td>
             <td style="font-size:12px;color:var(--text-muted)"><?= formatDate($sub['submitted_at'],'d/m/Y') ?><div style="font-size:10px"><?= formatDate($sub['submitted_at'],'H:i') ?></div></td>
             <td>
-              <a href="<?= url('teacher/evaluations/grade.php?type=case_study&id='.$sub['id']) ?>"
+              <a href="<?= url('teacher/evaluations/grade.php?type=exercise&id='.$sub['id']) ?>"
                  class="btn <?= $needsAction ? 'btn-warning' : 'btn-ghost' ?> btn-sm">
                 <i class="fas fa-<?= $needsAction ? 'pen-fancy' : 'eye' ?>"></i>
                 <?= $needsAction ? 'Corriger' : 'Voir' ?>
@@ -669,7 +657,7 @@ renderTopbar('Corrections & Résultats', [['Enseignant', url('teacher/index.php'
     </div>
   </div>
   <?php
-  $pp = array_filter(['section'=>'case_study','q'=>$search,'file_type'=>$fileType,'rncp_id'=>$rncpId?:'','formation_id'=>$formationId?:'','module_id'=>$moduleId?:'','at_id'=>$atId?:'','competency_id'=>$compId?:'']);
+  $pp = array_filter(['section'=>'exercise','q'=>$search,'sub_status'=>$subStatus,'module_id'=>$moduleId?:'','rncp_id'=>$rncpId?:'','at_id'=>$atId?:'','competency_id'=>$compId?:'']);
   echo $p['totalPages']>1 ? renderPagination($p, url('teacher/evaluations/index.php?'.http_build_query(array_filter($pp)))) : '';
   ?>
   <?php endif; ?>
