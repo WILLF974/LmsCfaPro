@@ -94,7 +94,15 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // Timezone depuis les paramètres admin (écrase le défaut Paris)
 $_tz = getSetting('timezone', 'Indian/Reunion');
-if ($_tz) date_default_timezone_set($_tz);
+if ($_tz) {
+    date_default_timezone_set($_tz);
+    // Aligner la session MySQL sur le même fuseau (le serveur Hostinger tourne en Europe/Paris)
+    try {
+        $_tzOffset = (new DateTimeImmutable())->format('P'); // ex : '+04:00'
+        getDB()->exec("SET time_zone = '" . $_tzOffset . "'");
+    } catch (\Exception $_e) { /* non-fatal — n'empêche pas le démarrage */ }
+    unset($_tzOffset, $_e);
+}
 unset($_tz);
 
 // Regénérer le token CSRF si absent
