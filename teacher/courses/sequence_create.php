@@ -10,7 +10,8 @@ $editId = (int)($_GET['id'] ?? 0);
 $seq = null;
 if ($editId) {
     $s = $pdo->prepare("
-        SELECT seq.*, c.activity_type_id AS at_id, at.rncp_title_id
+        SELECT seq.*, seq.scenario_path,
+               c.activity_type_id AS at_id, at.rncp_title_id
         FROM sequences seq
         LEFT JOIN competencies c  ON seq.competency_id = c.id
         LEFT JOIN activity_types at ON c.activity_type_id = at.id
@@ -34,6 +35,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$competencyId) $errors[] = 'La compétence est obligatoire.';
     if (!$title)        $errors[] = 'Le titre est obligatoire.';
 
+    // Gestion du scénario pédagogique
+    $scenarioPath = $editId ? ($seq['scenario_path'] ?? null) : null;
+    $deleteScenario = !empty($_POST['delete_scenario']);
+
+    if (!empty($_FILES['scenario_file']['name'])) {
+        $upload = uploadFile($_FILES['scenario_file'], 'scenarios', ALLOWED_DOC_TYPES, MAX_UPLOAD_SIZE);
+        if (!$upload['success']) {
+            $errors[] = 'Scénario : ' . $upload['error'];
+        } else {
+            // Supprimer l'ancien fichier si remplacement
+            if ($scenarioPath && file_exists(UPLOADS_PATH . '/' . $scenarioPath)) {
+                @unlink(UPLOADS_PATH . '/' . $scenarioPath);
+            }
+            $scenarioPath = $upload['path'];
+        }
+    } elseif ($deleteScenario) {
+        if ($scenarioPath && file_exists(UPLOADS_PATH . '/' . $scenarioPath)) {
+            @unlink(UPLOADS_PATH . '/' . $scenarioPath);
+        }
+        $scenarioPath = null;
+    }
+
     if (!$errors) {
         if (!$orderNum) {
             $maxOrd = $pdo->prepare("SELECT COALESCE(MAX(order_num),0)+1 FROM sequences WHERE competency_id = ?");
@@ -42,15 +65,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($editId) {
             $pdo->prepare("
-                UPDATE sequences SET competency_id=?, formation_id=?, title=?, description=?, order_num=?
+                UPDATE sequences SET competency_id=?, formation_id=?, title=?, description=?, order_num=?, scenario_path=?
                 WHERE id=?
-            ")->execute([$competencyId, $formationId, $title, $description ?: null, $orderNum, $editId]);
+            ")->execute([$competencyId, $formationId, $title, $description ?: null, $orderNum, $scenarioPath, $editId]);
             setFlash('success', 'Séquence mise à jour.');
         } else {
             $pdo->prepare("
-                INSERT INTO sequences (competency_id, formation_id, title, description, order_num, created_by)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ")->execute([$competencyId, $formationId, $title, $description ?: null, $orderNum, $userId]);
+                INSERT INTO sequences (competency_id, formation_id, title, description, order_num, scenario_path, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ")->execute([$competencyId, $formationId, $title, $description ?: null, $orderNum, $scenarioPath, $userId]);
             $newId = (int)$pdo->lastInsertId();
             setFlash('success', 'Séquence créée avec succès.');
             redirect(url('teacher/courses/sequences.php?highlight=' . $newId));
@@ -107,7 +130,7 @@ renderTopbar($pageTitle, [
 
     <div class="card">
       <div class="card-body" style="padding:28px">
-        <form method="POST" id="form-seq">
+        <form method="POST" id="form-seq" enctype="multipart/form-data">
           <?= csrfField() ?>
 
           <!-- Étape 1 : Compétence -->
@@ -177,6 +200,31 @@ renderTopbar($pageTitle, [
                 <label class="form-label">Description <span style="font-weight:400;color:var(--text-muted)">(optionnelle)</span></label>
                 <textarea name="description" class="form-control" rows="3" placeholder="Objectifs pédagogiques, contenu prévu…" style="resize:vertical"><?= e($seq['description'] ?? '') ?></textarea>
               </div>
+              <!-- Scénario pédagogique -->
+              <div>
+                <label class="form-label">
+                  <i class="fas fa-file-alt" style="color:#6366f1;margin-right:5px"></i>
+                  Scénario pédagogique <span style="font-weight:400;color:var(--text-muted)">(optionnel — PDF, Word, Excel, PPT)</span>
+                </label>
+                <?php if (!empty($seq['scenario_path'])): ?>
+                <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.2);border-radius:var(--radius-lg);margin-bottom:8px;font-size:12px">
+                  <i class="fas fa-file-alt" style="color:#6366f1;font-size:14px;flex-shrink:0"></i>
+                  <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary)">
+                    <?= e(basename($seq['scenario_path'])) ?>
+                  </span>
+                  <a href="<?= uploadUrl($seq['scenario_path']) ?>" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px">
+                    <i class="fas fa-download"></i> Télécharger
+                  </a>
+                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:#ef4444;white-space:nowrap;flex-shrink:0">
+                    <input type="checkbox" name="delete_scenario" value="1" style="accent-color:#ef4444">
+                    Supprimer
+                  </label>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Sélectionnez un nouveau fichier pour remplacer le scénario existant.</div>
+                <?php endif; ?>
+                <input type="file" name="scenario_file" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
+              </div>
+
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                 <div>
                   <label class="form-label">Ordre <span style="font-weight:400;color:var(--text-muted)">(auto si vide)</span></label>

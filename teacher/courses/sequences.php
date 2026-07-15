@@ -92,7 +92,7 @@ elseif ($atId){ $sqlWhere .= ' AND at.id = ?';              $sqlParams[] = $atId
 elseif ($rncpId){ $sqlWhere .= ' AND rt.id = ?';            $sqlParams[] = $rncpId; }
 
 $seqStmt = $pdo->prepare("
-    SELECT s.id, s.title, s.order_num, s.competency_id, s.is_published,
+    SELECT s.id, s.title, s.order_num, s.competency_id, s.is_published, s.scenario_path,
            c.code AS comp_code, c.title AS comp_title,
            at.id AS at_id, at.code AS at_code, at.title AS at_title,
            rt.id AS rncp_id, rt.rncp_code, rt.title AS rncp_title,
@@ -248,8 +248,15 @@ renderTopbar('Séquences', [['Enseignant', url('teacher/index.php')], ['Séquenc
             <!-- Titre -->
             <div style="flex:1;min-width:0">
               <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><?= e($seq['title']) ?></div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
-                <?= $seq['seance_count'] ?> séance<?= $seq['seance_count'] !== '1' ? 's' : '' ?>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;display:flex;align-items:center;gap:8px">
+                <span><?= $seq['seance_count'] ?> séance<?= $seq['seance_count'] !== '1' ? 's' : '' ?></span>
+                <?php if (!empty($seq['scenario_path'])): ?>
+                <a href="<?= uploadUrl($seq['scenario_path']) ?>" target="_blank"
+                   style="display:inline-flex;align-items:center;gap:3px;color:#6366f1;text-decoration:none;font-size:10px;font-weight:600;letter-spacing:.02em"
+                   title="Scénario pédagogique disponible — cliquer pour télécharger">
+                  <i class="fas fa-file-alt"></i> Scénario
+                </a>
+                <?php endif; ?>
               </div>
             </div>
 

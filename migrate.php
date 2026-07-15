@@ -210,6 +210,8 @@ $migrations = [
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ",
 
+    '019_add_scenario_path_seq' => "ALTER TABLE sequences ADD COLUMN IF NOT EXISTS scenario_path VARCHAR(500) DEFAULT NULL",
+
     '016_add_is_published_seq' => "ALTER TABLE sequences ADD COLUMN IF NOT EXISTS is_published TINYINT(1) NOT NULL DEFAULT 1",
     '016_add_is_published_mod' => "ALTER TABLE modules ADD COLUMN IF NOT EXISTS is_published TINYINT(1) NOT NULL DEFAULT 1",
 
