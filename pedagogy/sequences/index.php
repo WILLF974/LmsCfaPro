@@ -32,7 +32,7 @@ if ($search) { $where[] = 'seq.title LIKE ?'; $params[] = '%' . $search . '%'; }
 
 $sequences = $pdo->prepare("
     SELECT seq.id, seq.title, seq.description, seq.order_num, seq.created_by,
-           seq.competency_id, seq.formation_id, seq.is_published,
+           seq.competency_id, seq.formation_id, seq.is_published, seq.scenario_path,
            c.code AS comp_code, c.title AS comp_title,
            at.id AS at_id, at.code AS at_code, at.title AS at_title,
            rt.id AS rncp_id, rt.rncp_code, rt.title AS rncp_title,
@@ -204,7 +204,16 @@ renderTopbar('Séquences pédagogiques', [
         <tr style="border-bottom:1px solid var(--border-color);<?= !$s['is_published'] ? 'opacity:.45' : '' ?>;transition:opacity .2s">
           <td style="padding:12px 16px;color:var(--text-muted);font-size:12px"><?= $s['order_num'] ?></td>
           <td style="padding:12px 16px">
-            <div style="font-weight:600;color:var(--text-primary)"><?= e($s['title']) ?></div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-weight:600;color:var(--text-primary)"><?= e($s['title']) ?></span>
+              <?php if (!empty($s['scenario_path'])): ?>
+              <a href="<?= uploadUrl($s['scenario_path']) ?>" target="_blank"
+                 style="display:inline-flex;align-items:center;gap:3px;color:#6366f1;text-decoration:none;font-size:10px;font-weight:600;letter-spacing:.02em;white-space:nowrap"
+                 title="Scénario pédagogique disponible — cliquer pour télécharger">
+                <i class="fas fa-file-alt"></i> Scénario
+              </a>
+              <?php endif; ?>
+            </div>
             <?php if ($s['description']): ?>
             <div style="font-size:11px;color:var(--text-muted);margin-top:2px;line-height:1.4"><?= e(mb_substr($s['description'], 0, 80)) ?><?= mb_strlen($s['description'])>80?'…':'' ?></div>
             <?php endif; ?>
